@@ -10,8 +10,8 @@ body,
 }
 
 body {
-  background: #eef2f1;
-  color: #16201d;
+  background: #ecedf3;
+  color: #151723;
 }
 
 .app-layout {
@@ -19,8 +19,8 @@ body {
 }
 
 .app-sider {
-  background: #111c18 !important;
-  border-right: 1px solid #20332d;
+  background: #1c2540 !important;
+  border-right: 1px solid #2a3455;
 }
 
 .brand {
@@ -29,7 +29,7 @@ body {
   align-items: center;
   min-height: 84px;
   padding: 20px;
-  color: #f4fbf8;
+  color: #f0f2fc;
 }
 
 .brand-mark {
@@ -37,21 +37,21 @@ body {
   width: 42px;
   height: 42px;
   place-items: center;
-  color: #c6f6df;
-  background: #1f3a32;
-  border: 1px solid #335c50;
+  color: #c0ccf3;
+  background: #243050;
+  border: 1px solid #394870;
   border-radius: 8px;
 }
 
 .brand h1.ant-typography {
   margin: 0;
-  color: #f4fbf8;
+  color: #f0f2fc;
   font-size: 18px;
   line-height: 1.2;
 }
 
 .brand .ant-typography {
-  color: #9fb5ad;
+  color: #999fac;
   font-size: 12px;
 }
 
@@ -62,13 +62,13 @@ body {
 }
 
 .nav-menu .ant-menu-item {
-  color: #b7c8c1;
+  color: #b0b6c3;
   border-radius: 8px;
 }
 
 .nav-menu .ant-menu-item-selected {
-  color: #f6fffb;
-  background: #23624f !important;
+  color: #f2f4ff;
+  background: #2650a0 !important;
 }
 
 .app-header {
@@ -78,14 +78,14 @@ body {
   height: 56px;
   padding: 0 28px;
   background: #ffffff;
-  border-bottom: 1px solid #dde5e1;
+  border-bottom: 1px solid #dbdee5;
 }
 
 .app-content {
   min-width: 0;
   padding: 28px;
   overflow: auto;
-  background: #eef2f1;
+  background: #ecedf3;
 }
 
 .page-toolbar {
@@ -109,7 +109,7 @@ body {
 
 .surface {
   background: #ffffff;
-  border: 1px solid #dce5e1;
+  border: 1px solid #dbdee5;
   border-radius: 8px;
 }
 
@@ -122,11 +122,11 @@ body {
   margin: 0;
   padding: 14px;
   overflow: auto;
-  color: #d7ede5;
+  color: #d1d6e6;
   font-size: 12px;
   line-height: 1.55;
-  background: #101816;
-  border: 1px solid #263b35;
+  background: #141824;
+  border: 1px solid #2a3148;
   border-radius: 8px;
 }
 
@@ -158,6 +158,30 @@ body {
   gap: 16px;
 }
 
+.status-panel,
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.status-panel > div,
+.metric-tile {
+  min-height: 92px;
+  padding: 14px;
+  background: #f5f6fa;
+  border: 1px solid #dbdee5;
+  border-radius: 8px;
+}
+
+.metrics-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.status-panel h4.ant-typography {
+  margin: 8px 0 0;
+}
+
 .console-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
@@ -185,6 +209,8 @@ body {
 
   .form-grid,
   .cluster-grid,
+  .status-panel,
+  .metrics-grid,
   .console-layout {
     grid-template-columns: 1fr;
   }

@@ -3,8 +3,11 @@ import {
   Alert,
   App as AntApp,
   Button,
+  Collapse,
+  Descriptions,
   Divider,
   Drawer,
+  Empty,
   Form,
   Input,
   InputNumber,
@@ -13,6 +16,7 @@ import {
   Select,
   Space,
   Spin,
+  Statistic,
   Switch,
   Table,
   Tag,
@@ -31,6 +35,103 @@ import {
   type CollectionFormValues,
   type PayloadIndexType,
 } from "../services/collectionPayload";
+
+type AnyRecord = Record<string, unknown>;
+
+interface VectorRow {
+  key: string;
+  name: string;
+  size: string;
+  distance: string;
+  onDisk: string;
+}
+
+interface PayloadSchemaRow {
+  key: string;
+  field: string;
+  schema: string;
+}
+
+const asRecord = (value: unknown): AnyRecord =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as AnyRecord) : {};
+
+const asNumber = (value: unknown, fallback = 0) =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const unwrapResult = (value: unknown) => asRecord(asRecord(value).result ?? value);
+
+const displayValue = (value: unknown) => {
+  if (value === undefined || value === null || value === "") return "Default";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
+};
+
+const compactJson = (value: unknown) => {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+};
+
+const buildVectorRows = (params: AnyRecord): VectorRow[] => {
+  const vectors = asRecord(params.vectors);
+  if ("size" in vectors || "distance" in vectors) {
+    return [
+      {
+        key: "default",
+        name: "default",
+        size: displayValue(vectors.size),
+        distance: displayValue(vectors.distance),
+        onDisk: displayValue(vectors.on_disk),
+      },
+    ];
+  }
+
+  return Object.entries(vectors).map(([name, config]) => {
+    const vectorConfig = asRecord(config);
+    return {
+      key: name,
+      name,
+      size: displayValue(vectorConfig.size),
+      distance: displayValue(vectorConfig.distance),
+      onDisk: displayValue(vectorConfig.on_disk),
+    };
+  });
+};
+
+const buildSparseRows = (params: AnyRecord): VectorRow[] =>
+  Object.entries(asRecord(params.sparse_vectors)).map(([name, config]) => {
+    const sparseConfig = asRecord(config);
+    const index = asRecord(sparseConfig.index);
+    return {
+      key: name,
+      name,
+      size: "Sparse",
+      distance: displayValue(sparseConfig.modifier),
+      onDisk: displayValue(index.on_disk),
+    };
+  });
+
+const buildPayloadRows = (payloadSchema: AnyRecord): PayloadSchemaRow[] =>
+  Object.entries(payloadSchema).map(([field, schema]) => ({
+    key: field,
+    field,
+    schema: compactJson(schema),
+  }));
+
+const vectorColumns: ColumnsType<VectorRow> = [
+  { title: "Name", dataIndex: "name" },
+  { title: "Size", dataIndex: "size", width: 120 },
+  { title: "Distance / modifier", dataIndex: "distance", width: 170 },
+  { title: "On disk", dataIndex: "onDisk", width: 120 },
+];
+
+const payloadColumns: ColumnsType<PayloadSchemaRow> = [
+  { title: "Field", dataIndex: "field", width: 220 },
+  {
+    title: "Schema",
+    dataIndex: "schema",
+    render: (value: string) => <Typography.Text code>{value}</Typography.Text>,
+  },
+];
 
 const distanceOptions = ["Cosine", "Euclid", "Dot", "Manhattan"].map((value) => ({
   value,

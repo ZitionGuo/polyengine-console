@@ -212,7 +212,7 @@ export const RestConsolePage = () => {
                   <Button className="history-item" type="text" onClick={() => applyHistory(item)}>
                     <Space direction="vertical" size={2}>
                       <Space>
-                        <Tag color={requiresConfirmation(item.method) ? "orange" : "green"}>{item.method}</Tag>
+                        <Tag color={requiresConfirmation(item.method) ? "orange" : "blue"}>{item.method}</Tag>
                         <Typography.Text ellipsis style={{ maxWidth: 188 }}>
                           {item.path}
                         </Typography.Text>

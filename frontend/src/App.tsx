@@ -91,14 +91,14 @@ export const RootApp = () => (
   <ConfigProvider
     theme={{
       token: {
-        colorPrimary: "#087f5b",
+        colorPrimary: "#1677ff",
         borderRadius: 8,
         fontFamily:
           "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
       },
       components: {
         Button: { controlHeight: 36 },
-        Table: { headerBg: "#f5f7f8" },
+        Table: { headerBg: "#f5f6f8" },
       },
     }}
   >
