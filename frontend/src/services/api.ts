@@ -16,6 +16,11 @@ export interface AliasSummary {
   collection_name: string;
 }
 
+export interface AliasUpdatePayload {
+  new_alias_name?: string;
+  collection_name?: string;
+}
+
 export interface CollectionSnapshot {
   name: string;
   size: number;
@@ -76,6 +81,13 @@ export interface RestProxyPayload {
   path: string;
   query?: Record<string, unknown>;
   body?: unknown;
+}
+
+export interface RestProxyResult {
+  status_code: number;
+  headers: Record<string, string>;
+  duration_ms: number | null;
+  body: unknown;
 }
 
 export interface PointsScrollPayload {
@@ -351,6 +363,12 @@ export const api = {
       body: JSON.stringify({ new_alias_name: newAlias }),
     }),
 
+  updateAlias: (oldAlias: string, payload: AliasUpdatePayload) =>
+    request<QdrantEnvelope>(`/api/aliases/${encodeURIComponent(oldAlias)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
   deleteAlias: (aliasName: string) =>
     request<QdrantEnvelope>(`/api/aliases/${encodeURIComponent(aliasName)}`, {
       method: "DELETE",
@@ -366,7 +384,7 @@ export const api = {
     ),
 
   restProxy: (payload: RestProxyPayload) =>
-    request<unknown>("/api/rest", {
+    request<RestProxyResult>("/api/rest", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

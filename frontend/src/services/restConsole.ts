@@ -262,15 +262,30 @@ export const summarizeResponse = (value: unknown) => {
   if (value instanceof Error) {
     return {
       status: "error",
+      statusCode: null,
       time: "n/a",
       result: value.message,
     };
   }
 
-  const envelope = isRecord(value) ? value : {};
-  const status = typeof envelope.status === "string" ? envelope.status : "ok";
-  const time = typeof envelope.time === "number" ? `${(envelope.time * 1000).toFixed(2)} ms` : "n/a";
-  const result = summarizeResult("result" in envelope ? envelope.result : value);
+  const proxyResponse = isRecord(value) && typeof value.status_code === "number" ? value : null;
+  const responseBody = proxyResponse ? proxyResponse.body : value;
+  const envelope = isRecord(responseBody) ? responseBody : {};
+  const statusCode = proxyResponse ? (proxyResponse.status_code as number) : null;
+  const status = statusCode
+    ? statusCode >= 200 && statusCode < 400
+      ? "ok"
+      : "error"
+    : typeof envelope.status === "string"
+      ? envelope.status
+      : "ok";
+  const time =
+    proxyResponse && typeof proxyResponse.duration_ms === "number"
+      ? `${proxyResponse.duration_ms.toFixed(2)} ms`
+      : typeof envelope.time === "number"
+        ? `${(envelope.time * 1000).toFixed(2)} ms`
+        : "n/a";
+  const result = summarizeResult("result" in envelope ? envelope.result : responseBody);
 
-  return { status, time, result };
+  return { status, statusCode, time, result };
 };

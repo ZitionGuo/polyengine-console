@@ -20,6 +20,11 @@ import { useMemo, useState } from "react";
 import { JsonView } from "../components/JsonView";
 import { PageToolbar } from "../components/PageToolbar";
 import { api } from "../services/api";
+import {
+  getClusterMode,
+  shouldRequestCollectionCluster,
+  shouldRequestCollectionDetails,
+} from "../services/cluster";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -168,16 +173,28 @@ export const ClusterPage = () => {
     queryFn: api.listCollections,
   });
 
+  const clusterMode = getClusterMode(clusterQuery.data);
+  const clusterStatusSettled = clusterQuery.isSuccess || clusterQuery.isError;
+
   const collectionClusterQuery = useQuery({
     queryKey: ["collections", collectionName, "cluster"],
     queryFn: () => api.getCollectionCluster(collectionName!),
-    enabled: Boolean(collectionName),
+    enabled: shouldRequestCollectionCluster(
+      Boolean(collectionName),
+      clusterQuery.isSuccess,
+      clusterMode,
+    ),
   });
 
   const collectionDetailsQuery = useQuery({
     queryKey: ["collections", collectionName],
     queryFn: () => api.getCollection(collectionName!),
-    enabled: Boolean(collectionName) && collectionClusterQuery.isError,
+    enabled: shouldRequestCollectionDetails(
+      Boolean(collectionName),
+      clusterStatusSettled,
+      clusterMode,
+      collectionClusterQuery.isError,
+    ),
   });
 
   const refreshAll = () => {
@@ -185,8 +202,12 @@ export const ClusterPage = () => {
     telemetryQuery.refetch();
     collectionsQuery.refetch();
     if (collectionName) {
-      collectionClusterQuery.refetch();
-      collectionDetailsQuery.refetch();
+      if (clusterMode === "enabled") {
+        collectionClusterQuery.refetch();
+      }
+      if (clusterMode !== "enabled" || collectionClusterQuery.isError) {
+        collectionDetailsQuery.refetch();
+      }
     }
   };
 
@@ -206,10 +227,16 @@ export const ClusterPage = () => {
   const shardRows = useMemo(() => buildShardRows(collectionCluster), [collectionCluster]);
   const transferRows = useMemo(() => buildTransferRows(collectionCluster), [collectionCluster]);
   const configShardRows = useMemo(() => buildCollectionConfigShardRows(collectionDetails), [collectionDetails]);
-  const displayedShardRows = shardRows.length ? shardRows : collectionClusterQuery.isError ? configShardRows : [];
+  const usingCollectionConfig =
+    Boolean(collectionName) &&
+    clusterStatusSettled &&
+    (clusterMode !== "enabled" || collectionClusterQuery.isError);
+  const displayedShardRows = shardRows.length ? shardRows : usingCollectionConfig ? configShardRows : [];
   const endpointRows = useMemo(() => flattenEndpointRows(telemetry), [telemetry]);
-  const showingConfigFallback = collectionClusterQuery.isError && configShardRows.length > 0;
-  const shardPanelLoading = collectionClusterQuery.isFetching || collectionDetailsQuery.isFetching;
+  const showingConfigFallback = usingCollectionConfig && configShardRows.length > 0;
+  const shardPanelLoading =
+    Boolean(collectionName) &&
+    (clusterQuery.isLoading || collectionClusterQuery.isFetching || collectionDetailsQuery.isFetching);
   const shardCount = collectionCluster.shard_count ?? getCollectionConfigShardCount(collectionDetails);
   const rawShardData = collectionClusterQuery.data ?? collectionDetailsQuery.data ?? null;
 
@@ -367,6 +394,22 @@ export const ClusterPage = () => {
                 }
               />
             ) : null}
+            {collectionName && clusterMode === "disabled" ? (
+              <Alert
+                type="info"
+                showIcon
+                message="Single-node mode: showing collection configuration"
+                description="Qdrant cluster placement is disabled, so shard count and point totals come from the collection details endpoint."
+              />
+            ) : null}
+            {collectionName && clusterQuery.isError ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="Cluster status unavailable, showing collection configuration"
+                description={clusterQuery.error instanceof Error ? clusterQuery.error.message : undefined}
+              />
+            ) : null}
             {collectionClusterQuery.isError ? (
               <Alert
                 type={showingConfigFallback ? "info" : "warning"}
@@ -388,15 +431,38 @@ export const ClusterPage = () => {
                 }
               />
             ) : null}
+            {collectionDetailsQuery.isError ? (
+              <Alert
+                type="error"
+                showIcon
+                message="Unable to load collection configuration"
+                description={
+                  collectionDetailsQuery.error instanceof Error
+                    ? collectionDetailsQuery.error.message
+                    : undefined
+                }
+                action={
+                  <Button size="small" onClick={() => collectionDetailsQuery.refetch()}>
+                    Retry
+                  </Button>
+                }
+              />
+            ) : null}
             {shardPanelLoading ? <Spin /> : null}
-            {(collectionClusterQuery.data || showingConfigFallback) && collectionName ? (
+            {(collectionClusterQuery.data || collectionDetailsQuery.data) && collectionName ? (
               <>
                 <Descriptions
                   bordered
                   size="small"
                   column={1}
                   items={[
-                    { key: "peer", label: "Peer ID", children: displayUnknown(collectionCluster.peer_id) },
+                    {
+                      key: "peer",
+                      label: "Peer ID",
+                      children: usingCollectionConfig
+                        ? "Single node"
+                        : displayUnknown(collectionCluster.peer_id),
+                    },
                     { key: "count", label: "Shard count", children: displayUnknown(shardCount) },
                     { key: "transfers", label: "Transfers", children: String(transferRows.length) },
                   ]}
@@ -435,7 +501,7 @@ export const ClusterPage = () => {
                   ]}
                 />
               </>
-            ) : !collectionClusterQuery.isError ? (
+            ) : !collectionName ? (
               <Typography.Text type="secondary">Select a collection to inspect shard state.</Typography.Text>
             ) : null}
           </Space>

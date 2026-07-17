@@ -7,22 +7,40 @@ describe("api service", () => {
     vi.unstubAllGlobals();
   });
 
-  it("posts alias mutations to the backend alias API", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ status: "ok" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+  it("posts alias create and update mutations to the backend alias API", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ status: "ok" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     await api.createAlias("docs", "docs_live");
+    await api.updateAlias("docs/live", {
+      new_alias_name: "docs_current",
+      collection_name: "docs_v2",
+    });
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
       "/api/aliases",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ collection_name: "docs", alias_name: "docs_live" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/aliases/docs%2Flive",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          new_alias_name: "docs_current",
+          collection_name: "docs_v2",
+        }),
       }),
     );
   });

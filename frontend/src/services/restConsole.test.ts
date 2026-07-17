@@ -66,6 +66,7 @@ describe("restConsole helpers", () => {
       }),
     ).toEqual({
       status: "ok",
+      statusCode: null,
       time: "3.00 ms",
       result: "2 collections",
     });
@@ -80,6 +81,35 @@ describe("restConsole helpers", () => {
     ).toMatchObject({
       status: "ok",
       result: "1 point",
+    });
+  });
+
+  it("summarizes REST proxy metadata separately from the Qdrant body", () => {
+    expect(
+      summarizeResponse({
+        status_code: 202,
+        headers: { "content-type": "application/json" },
+        duration_ms: 4.125,
+        body: { result: true, status: "ok", time: 0.001 },
+      }),
+    ).toEqual({
+      status: "ok",
+      statusCode: 202,
+      time: "4.13 ms",
+      result: "True",
+    });
+
+    expect(
+      summarizeResponse({
+        status_code: 404,
+        headers: {},
+        duration_ms: null,
+        body: { detail: { message: "Not found" } },
+      }),
+    ).toMatchObject({
+      status: "error",
+      statusCode: 404,
+      time: "n/a",
     });
   });
 });

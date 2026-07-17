@@ -1,5 +1,15 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { Badge, ConfigProvider, Layout, Menu, Space, Tooltip, Typography, App as AntApp } from "antd";
+import {
+  App as AntApp,
+  Badge,
+  ConfigProvider,
+  Layout,
+  Menu,
+  Space,
+  Spin,
+  Tooltip,
+  Typography,
+} from "antd";
 import {
   Boxes,
   Braces,
@@ -7,16 +17,29 @@ import {
   GitBranch,
   Network,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
-import { AliasesPage } from "./pages/AliasesPage";
-import { ClusterPage } from "./pages/ClusterPage";
-import { CollectionsPage } from "./pages/CollectionsPage";
-import { RestConsolePage } from "./pages/RestConsolePage";
 import { api } from "./services/api";
+import {
+  getPageDocumentTitle,
+  getPageFromPath,
+  getPagePath,
+  type PageKey,
+} from "./services/navigation";
 import "./styles/app.css";
 
-type PageKey = "collections" | "aliases" | "cluster" | "rest";
+const CollectionsPage = lazy(() =>
+  import("./pages/CollectionsPage").then((module) => ({ default: module.CollectionsPage })),
+);
+const AliasesPage = lazy(() =>
+  import("./pages/AliasesPage").then((module) => ({ default: module.AliasesPage })),
+);
+const ClusterPage = lazy(() =>
+  import("./pages/ClusterPage").then((module) => ({ default: module.ClusterPage })),
+);
+const RestConsolePage = lazy(() =>
+  import("./pages/RestConsolePage").then((module) => ({ default: module.RestConsolePage })),
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,8 +58,17 @@ const navigation = [
   { key: "rest", icon: <Braces size={18} />, label: "REST Console" },
 ];
 
+const PageLoading = () => (
+  <div className="surface page-loading" role="status" aria-live="polite">
+    <Spin size="large" />
+    <Typography.Text type="secondary">Loading view...</Typography.Text>
+  </div>
+);
+
 const Shell = () => {
-  const [page, setPage] = useState<PageKey>("collections");
+  const [page, setPage] = useState<PageKey>(
+    () => getPageFromPath(window.location.pathname) ?? "collections",
+  );
   const healthQuery = useQuery({
     queryKey: ["health"],
     queryFn: api.health,
@@ -45,14 +77,41 @@ const Shell = () => {
     refetchInterval: (query) => (query.state.status === "error" ? 5_000 : 30_000),
   });
 
-  const pageNode = useMemo(() => {
+  const pageNode = (() => {
     if (page === "aliases") return <AliasesPage />;
     if (page === "cluster") return <ClusterPage />;
     if (page === "rest") return <RestConsolePage />;
     return <CollectionsPage />;
-  }, [page]);
+  })();
   const healthError = healthQuery.error instanceof Error ? healthQuery.error.message : "Qdrant is unreachable.";
   const healthState = healthQuery.isFetching ? "checking" : healthQuery.isError ? "error" : "ok";
+
+  useEffect(() => {
+    const syncPageFromLocation = () => {
+      const nextPage = getPageFromPath(window.location.pathname) ?? "collections";
+      const canonicalPath = getPagePath(nextPage);
+      if (window.location.pathname !== canonicalPath) {
+        window.history.replaceState(window.history.state, "", canonicalPath);
+      }
+      setPage(nextPage);
+    };
+
+    syncPageFromLocation();
+    window.addEventListener("popstate", syncPageFromLocation);
+    return () => window.removeEventListener("popstate", syncPageFromLocation);
+  }, []);
+
+  useEffect(() => {
+    document.title = getPageDocumentTitle(page);
+  }, [page]);
+
+  const navigateTo = (nextPage: PageKey) => {
+    const nextPath = getPagePath(nextPage);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({ page: nextPage }, "", nextPath);
+    }
+    setPage(nextPage);
+  };
 
   return (
     <Layout className="app-layout">
@@ -70,7 +129,7 @@ const Shell = () => {
           mode="inline"
           selectedKeys={[page]}
           items={navigation}
-          onClick={(item) => setPage(item.key as PageKey)}
+          onClick={(item) => navigateTo(item.key as PageKey)}
           className="nav-menu"
         />
       </Layout.Sider>
@@ -95,7 +154,9 @@ const Shell = () => {
             </Space>
           </Tooltip>
         </Layout.Header>
-        <Layout.Content className="app-content">{pageNode}</Layout.Content>
+        <Layout.Content className="app-content">
+          <Suspense fallback={<PageLoading />}>{pageNode}</Suspense>
+        </Layout.Content>
       </Layout>
     </Layout>
   );

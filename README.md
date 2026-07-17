@@ -9,10 +9,13 @@ A local Qdrant management console with a FastAPI proxy backend and a React + Typ
 - Per-collection snapshot list, creation, streaming download, and deletion with size, creation time, and checksum display.
 - Structured optimization activity with queue totals, running task progress, idle segments, and recent completed work.
 - Point management inside collection details: scroll preview with first/previous/next navigation, JSON upsert, delete by point id, payload replacement/clearing without resending vectors, payload filter browsing, and vector query/search with score display.
-- Alias list, create, rename, and delete.
-- Cluster status, telemetry summary, and per-collection shard state with single-node/disabled-cluster messaging.
-- REST console for raw Qdrant calls through the backend proxy, with common request templates, local history, response summaries, and confirmation for mutating methods.
+- Alias list, create, rename, collection reassignment, and delete. Renaming and reassignment are submitted as one atomic Qdrant alias update.
+- Cluster status, telemetry summary, and per-collection shard state. Single-node instances use collection configuration directly instead of surfacing an expected cluster-endpoint failure.
+- REST console for raw Qdrant calls through the backend proxy, with common request templates, local history, upstream HTTP status/duration/response headers, response summaries, and confirmation for mutating methods.
 - Backend proxy keeps Qdrant response envelopes where possible and normalizes upstream errors into a consistent `detail` shape.
+- Collections, Aliases, Cluster, and REST Console are loaded on demand; production builds separate React, Ant Design, rc components, and icons into stable vendor chunks.
+- Each main view has a stable URL (`/collections`, `/aliases`, `/cluster`, `/rest`) with refresh and browser history support.
+- The FastAPI lifespan owns pooled normal-request and streaming `httpx` clients, reusing Qdrant connections and closing them cleanly on shutdown.
 
 ## Project layout
 
@@ -40,7 +43,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. The frontend proxies `/api` to `http://127.0.0.1:8000`.
+Open `http://localhost:5173/collections`. The frontend proxies `/api` to `http://127.0.0.1:8000`.
 
 The backend talks to Qdrant through `QDRANT_URL` and ignores host proxy environment variables for those upstream calls, which keeps local `localhost:6333` requests from being accidentally routed through a system proxy.
 
@@ -68,6 +71,19 @@ CORS_ORIGINS='["http://localhost:5173","http://127.0.0.1:5173"]'
 - `GET /api/aliases`, `POST /api/aliases`, `PATCH /api/aliases/{old_alias}`, `DELETE /api/aliases/{alias}`
 - `GET /api/cluster`, `GET /api/cluster/telemetry`, `GET /api/collections/{name}/cluster`
 - `POST /api/rest`
+
+Successful REST Console proxy calls return metadata alongside the unmodified Qdrant body:
+
+```json
+{
+  "status_code": 200,
+  "headers": { "content-type": "application/json" },
+  "duration_ms": 12.345,
+  "body": { "result": {}, "status": "ok", "time": 0.001 }
+}
+```
+
+Only non-sensitive response headers are included. Upstream errors continue to use the shared `detail: { message, upstream_status, upstream_body }` error shape and the upstream HTTP status.
 
 ## Verification
 

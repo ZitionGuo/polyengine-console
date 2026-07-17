@@ -3,6 +3,8 @@ import {
   Alert,
   App as AntApp,
   Button,
+  Collapse,
+  Descriptions,
   Divider,
   Input,
   List,
@@ -16,7 +18,12 @@ import { useEffect, useMemo, useState } from "react";
 
 import { JsonView } from "../components/JsonView";
 import { PageToolbar } from "../components/PageToolbar";
-import { api, type RestProxyPayload } from "../services/api";
+import {
+  ApiError,
+  api,
+  type RestProxyPayload,
+  type RestProxyResult,
+} from "../services/api";
 import {
   parseJsonBody,
   parseJsonObject,
@@ -53,7 +60,7 @@ export const RestConsolePage = () => {
   const [path, setPath] = useState("/collections");
   const [queryText, setQueryText] = useState("{}");
   const [bodyText, setBodyText] = useState("{\n  \n}");
-  const [response, setResponse] = useState<unknown>(null);
+  const [response, setResponse] = useState<RestProxyResult | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>(loadHistory);
   const [templateKey, setTemplateKey] = useState<string | undefined>();
 
@@ -64,26 +71,42 @@ export const RestConsolePage = () => {
   const bodyDisabled = useMemo(() => method === "GET" || method === "HEAD", [method]);
   const selectedTemplate = restTemplates.find((template) => template.key === templateKey);
   const responseSummary = useMemo(() => summarizeResponse(response), [response]);
+  const responseHeaders = Object.entries(response?.headers ?? {}).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+
+  const saveHistory = () => {
+    setHistory((current) => [
+      {
+        id: crypto.randomUUID(),
+        method,
+        path,
+        queryText,
+        bodyText,
+        createdAt: new Date().toISOString(),
+      },
+      ...current.filter((item) => !(item.method === method && item.path === path)),
+    ]);
+  };
 
   const restMutation = useMutation({
     mutationFn: (payload: RestProxyPayload) => api.restProxy(payload),
     onSuccess: (result) => {
       setResponse(result);
-      setHistory((current) => [
-        {
-          id: crypto.randomUUID(),
-          method,
-          path,
-          queryText,
-          bodyText,
-          createdAt: new Date().toISOString(),
-        },
-        ...current.filter((item) => !(item.method === method && item.path === path)),
-      ]);
+      saveHistory();
       message.success("Request completed.");
     },
     onError: (error) => {
-      setResponse(error);
+      setResponse({
+        status_code: error instanceof ApiError ? error.status : 0,
+        headers: {},
+        duration_ms: null,
+        body:
+          error instanceof ApiError
+            ? error.detail
+            : { detail: { message: error instanceof Error ? error.message : "Request failed." } },
+      });
+      saveHistory();
       message.error(error instanceof Error ? error.message : "Request failed.");
     },
   });
@@ -234,12 +257,22 @@ export const RestConsolePage = () => {
             {response ? (
               <div className="response-summary">
                 <div>
-                  <Typography.Text type="secondary">Status</Typography.Text>
-                  <Tag color={responseSummary.status === "ok" ? "green" : "red"}>{responseSummary.status}</Tag>
+                  <Typography.Text type="secondary">HTTP status</Typography.Text>
+                  <Tag color={responseSummary.status === "ok" ? "green" : "red"}>
+                    {responseSummary.statusCode === 0
+                      ? "Network error"
+                      : `${responseSummary.statusCode ?? "-"} ${responseSummary.status.toUpperCase()}`}
+                  </Tag>
                 </div>
                 <div>
-                  <Typography.Text type="secondary">Time</Typography.Text>
+                  <Typography.Text type="secondary">Upstream time</Typography.Text>
                   <Typography.Text strong>{responseSummary.time}</Typography.Text>
+                </div>
+                <div>
+                  <Typography.Text type="secondary">Content type</Typography.Text>
+                  <Typography.Text strong>
+                    {response.headers["content-type"] ?? "Unknown"}
+                  </Typography.Text>
                 </div>
                 <div>
                   <Typography.Text type="secondary">Result</Typography.Text>
@@ -247,7 +280,30 @@ export const RestConsolePage = () => {
                 </div>
               </div>
             ) : null}
-            <JsonView data={response ?? { ready: true }} minHeight={300} />
+            {responseHeaders.length ? (
+              <Collapse
+                size="small"
+                items={[
+                  {
+                    key: "response-headers",
+                    label: `Response headers (${responseHeaders.length})`,
+                    children: (
+                      <Descriptions
+                        bordered
+                        size="small"
+                        column={1}
+                        items={responseHeaders.map(([name, value]) => ({
+                          key: name,
+                          label: name,
+                          children: <Typography.Text code>{value}</Typography.Text>,
+                        }))}
+                      />
+                    ),
+                  },
+                ]}
+              />
+            ) : null}
+            <JsonView data={response?.body ?? { ready: true }} minHeight={300} />
           </Space>
         </section>
 

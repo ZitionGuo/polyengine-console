@@ -3,10 +3,11 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
 from app.config import Settings
 from app.main import create_app
-from app.qdrant import QdrantClient, QdrantStream, get_qdrant_client
+from app.qdrant import QdrantClient, QdrantHttpResponse, QdrantStream, get_qdrant_client
 
 
 class RecordingQdrantClient:
@@ -27,6 +28,20 @@ class RecordingQdrantClient:
             body=body(),
             content_type="application/octet-stream",
             content_length="13",
+        )
+
+    async def request_with_metadata(self, method: str, path: str, **kwargs):
+        body = await self.request(method, path, **kwargs)
+        return QdrantHttpResponse(
+            body=body,
+            status_code=200,
+            headers={
+                "content-type": "application/json",
+                "content-length": "27",
+                "set-cookie": "should-not-leave-backend=true",
+                "x-internal-secret": "hidden",
+            },
+            duration_ms=1.23456,
         )
 
 
@@ -76,6 +91,82 @@ async def test_alias_create_maps_to_qdrant_action_payload():
             },
         }
     ]
+
+
+@pytest.mark.anyio
+async def test_alias_update_renames_without_recreating_alias():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.patch(
+            "/api/aliases/docs_live",
+            json={"new_alias_name": " docs_current "},
+        )
+
+    assert response.status_code == 200
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/collections/aliases",
+            "json": {
+                "actions": [
+                    {
+                        "rename_alias": {
+                            "old_alias_name": "docs_live",
+                            "new_alias_name": "docs_current",
+                        }
+                    }
+                ]
+            },
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_alias_update_reassigns_and_optionally_renames_atomically():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.patch(
+            "/api/aliases/docs_live",
+            json={
+                "new_alias_name": "docs_current",
+                "collection_name": "docs_v2",
+            },
+        )
+
+    assert response.status_code == 200
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/collections/aliases",
+            "json": {
+                "actions": [
+                    {"delete_alias": {"alias_name": "docs_live"}},
+                    {
+                        "create_alias": {
+                            "collection_name": "docs_v2",
+                            "alias_name": "docs_current",
+                        }
+                    },
+                ]
+            },
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_alias_update_requires_at_least_one_change_field():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.patch("/api/aliases/docs_live", json={})
+
+    assert response.status_code == 422
+    assert fake.calls == []
 
 
 @pytest.mark.anyio
@@ -244,6 +335,42 @@ async def test_rest_proxy_rejects_absolute_urls():
     assert response.status_code == 400
     assert response.json()["detail"]["message"] == "Only relative Qdrant API paths are allowed."
     assert fake.calls == []
+
+
+@pytest.mark.anyio
+async def test_rest_proxy_returns_safe_upstream_response_metadata():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/rest",
+            json={
+                "method": "POST",
+                "path": "/collections/docs/points/scroll",
+                "query": {"consistency": "majority"},
+                "body": {"limit": 5},
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status_code": 200,
+        "headers": {
+            "content-type": "application/json",
+            "content-length": "27",
+        },
+        "duration_ms": 1.235,
+        "body": {"ok": True, "path": "/collections/docs/points/scroll"},
+    }
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/collections/docs/points/scroll",
+            "params": {"consistency": "majority"},
+            "json": {"limit": 5},
+        }
+    ]
 
 
 @pytest.mark.anyio
@@ -456,8 +583,11 @@ async def test_qdrant_client_passes_through_upstream_errors():
         transport=httpx.MockTransport(handler),
     )
 
-    with pytest.raises(HTTPException) as exc_info:
-        await client.request("PUT", "/collections/docs", json={"vectors": {}})
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await client.request("PUT", "/collections/docs", json={"vectors": {}})
+    finally:
+        await client.aclose()
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == {
@@ -465,6 +595,31 @@ async def test_qdrant_client_passes_through_upstream_errors():
         "upstream_status": 409,
         "upstream_body": {"status": "error", "result": {"reason": "exists"}},
     }
+
+
+@pytest.mark.anyio
+async def test_qdrant_client_exposes_success_response_metadata():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/collections"
+        return httpx.Response(
+            202,
+            json={"result": True, "status": "ok"},
+            headers={"x-request-id": "request-123"},
+        )
+
+    client = QdrantClient(
+        Settings(qdrant_url="http://qdrant.local"),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        response = await client.request_with_metadata("GET", "/collections")
+    finally:
+        await client.aclose()
+
+    assert response.body == {"result": True, "status": "ok"}
+    assert response.status_code == 202
+    assert response.headers["x-request-id"] == "request-123"
+    assert response.duration_ms >= 0
 
 
 @pytest.mark.anyio
@@ -485,12 +640,55 @@ async def test_qdrant_client_streams_binary_with_api_key():
         Settings(qdrant_url="http://qdrant.local", qdrant_api_key="test-qdrant-key"),
         transport=httpx.MockTransport(handler),
     )
-    stream = await client.stream(
-        "GET",
-        "/collections/docs/snapshots/test.snapshot",
-    )
-    body = b"".join([chunk async for chunk in stream.body])
+    try:
+        stream = await client.stream(
+            "GET",
+            "/collections/docs/snapshots/test.snapshot",
+        )
+        body = b"".join([chunk async for chunk in stream.body])
+    finally:
+        await client.aclose()
 
     assert body == b"binary-snapshot"
     assert stream.content_type == "application/octet-stream"
     assert stream.content_length == "15"
+
+
+@pytest.mark.anyio
+async def test_qdrant_client_reuses_request_pool_until_closed():
+    request_count = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={"request": request_count})
+
+    client = QdrantClient(
+        Settings(qdrant_url="http://qdrant.local"),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        assert await client.request("GET", "/") == {"request": 1}
+        request_client = client._request_client
+        assert request_client is not None
+        assert await client.request("GET", "/collections") == {"request": 2}
+        assert client._request_client is request_client
+        assert not request_client.is_closed
+    finally:
+        await client.aclose()
+
+    assert request_client.is_closed
+
+
+@pytest.mark.anyio
+async def test_app_lifespan_provides_and_closes_shared_qdrant_client():
+    app = create_app()
+
+    async with app.router.lifespan_context(app):
+        request = Request({"type": "http", "app": app})
+        shared_client = get_qdrant_client(request)
+        assert shared_client is app.state.qdrant_client
+        request_client = shared_client._get_request_client()
+        assert not request_client.is_closed
+
+    assert request_client.is_closed

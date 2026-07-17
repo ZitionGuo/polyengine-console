@@ -1,15 +1,25 @@
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+
+NonEmptyName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class AliasCreateRequest(BaseModel):
-    alias_name: str = Field(min_length=1)
-    collection_name: str = Field(min_length=1)
+    alias_name: NonEmptyName
+    collection_name: NonEmptyName
 
 
-class AliasRenameRequest(BaseModel):
-    new_alias_name: str = Field(min_length=1)
+class AliasUpdateRequest(BaseModel):
+    new_alias_name: NonEmptyName | None = None
+    collection_name: NonEmptyName | None = None
+
+    @model_validator(mode="after")
+    def require_change(self):
+        if self.new_alias_name is None and self.collection_name is None:
+            raise ValueError("At least one alias update field is required.")
+        return self
 
 
 class IndexCreateRequest(BaseModel):

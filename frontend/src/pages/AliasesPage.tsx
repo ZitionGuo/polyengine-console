@@ -18,6 +18,10 @@ import { useState } from "react";
 
 import { PageToolbar } from "../components/PageToolbar";
 import { api, type AliasSummary } from "../services/api";
+import {
+  buildAliasUpdatePayload,
+  type AliasEditValues,
+} from "../services/aliases";
 
 interface AliasFormValues {
   collectionName: string;
@@ -28,9 +32,9 @@ export const AliasesPage = () => {
   const { message, modal } = AntApp.useApp();
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
-  const [renameAlias, setRenameAlias] = useState<AliasSummary | null>(null);
+  const [editingAlias, setEditingAlias] = useState<AliasSummary | null>(null);
   const [createForm] = Form.useForm<AliasFormValues>();
-  const [renameForm] = Form.useForm<{ newAliasName: string }>();
+  const [editForm] = Form.useForm<AliasEditValues>();
 
   const aliasesQuery = useQuery({
     queryKey: ["aliases"],
@@ -58,16 +62,16 @@ export const AliasesPage = () => {
     onError: (error) => message.error(error instanceof Error ? error.message : "Failed to create alias."),
   });
 
-  const renameMutation = useMutation({
-    mutationFn: (values: { oldAlias: string; newAlias: string }) =>
-      api.renameAlias(values.oldAlias, values.newAlias),
+  const updateMutation = useMutation({
+    mutationFn: ({ alias, values }: { alias: AliasSummary; values: AliasEditValues }) =>
+      api.updateAlias(alias.alias_name, buildAliasUpdatePayload(alias, values)),
     onSuccess: () => {
-      setRenameAlias(null);
-      renameForm.resetFields();
+      setEditingAlias(null);
+      editForm.resetFields();
       invalidateAliases();
-      message.success("Alias renamed.");
+      message.success("Alias updated.");
     },
-    onError: (error) => message.error(error instanceof Error ? error.message : "Failed to rename alias."),
+    onError: (error) => message.error(error instanceof Error ? error.message : "Failed to update alias."),
   });
 
   const deleteMutation = useMutation({
@@ -102,12 +106,16 @@ export const AliasesPage = () => {
       align: "right",
       render: (_, record) => (
         <Space>
-          <Tooltip title="Rename alias">
+          <Tooltip title="Edit alias">
             <Button
+              aria-label={`Edit ${record.alias_name}`}
               icon={<Edit3 size={16} />}
               onClick={() => {
-                setRenameAlias(record);
-                renameForm.setFieldsValue({ newAliasName: record.alias_name });
+                setEditingAlias(record);
+                editForm.setFieldsValue({
+                  aliasName: record.alias_name,
+                  collectionName: record.collection_name,
+                });
               }}
             />
           </Tooltip>
@@ -135,7 +143,7 @@ export const AliasesPage = () => {
     <>
       <PageToolbar
         title="Aliases"
-        subtitle="Map stable names to collections and rename them atomically."
+        subtitle="Map stable names to collections and update routing atomically."
         actions={
           <>
             <Tooltip title="Refresh">
@@ -191,7 +199,7 @@ export const AliasesPage = () => {
           <Form.Item
             label="Alias"
             name="aliasName"
-            rules={[{ required: true, message: "Alias is required." }]}
+            rules={[{ required: true, whitespace: true, message: "Alias is required." }]}
           >
             <Input placeholder="documents_live" />
           </Form.Item>
@@ -199,30 +207,39 @@ export const AliasesPage = () => {
       </Modal>
 
       <Modal
-        title={`Rename ${renameAlias?.alias_name ?? "alias"}`}
-        open={Boolean(renameAlias)}
-        okText="Rename"
-        confirmLoading={renameMutation.isPending}
-        onOk={() => renameForm.submit()}
-        onCancel={() => setRenameAlias(null)}
+        title={`Edit ${editingAlias?.alias_name ?? "alias"}`}
+        open={Boolean(editingAlias)}
+        okText="Save changes"
+        confirmLoading={updateMutation.isPending}
+        onOk={() => editForm.submit()}
+        onCancel={() => setEditingAlias(null)}
       >
         <Form
-          form={renameForm}
+          form={editForm}
           layout="vertical"
           onFinish={(values) => {
-            if (!renameAlias) return;
-            renameMutation.mutate({
-              oldAlias: renameAlias.alias_name,
-              newAlias: values.newAliasName,
-            });
+            if (!editingAlias) return;
+            updateMutation.mutate({ alias: editingAlias, values });
           }}
         >
           <Form.Item
-            label="New alias"
-            name="newAliasName"
-            rules={[{ required: true, message: "New alias is required." }]}
+            label="Alias"
+            name="aliasName"
+            rules={[{ required: true, whitespace: true, message: "Alias is required." }]}
           >
             <Input />
+          </Form.Item>
+          <Form.Item
+            label="Collection"
+            name="collectionName"
+            rules={[{ required: true, message: "Collection is required." }]}
+          >
+            <Select
+              options={collectionOptions}
+              showSearch
+              optionFilterProp="label"
+              placeholder="Select collection"
+            />
           </Form.Item>
         </Form>
       </Modal>
