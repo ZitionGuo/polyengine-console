@@ -6,6 +6,7 @@ import {
   buildPointScrollPayload,
   hasPointFilter,
   normalizePointFilterJson,
+  parsePointPayloadInput,
   parsePointIdsInput,
   parseUpsertPointsInput,
 } from "./points";
@@ -60,6 +61,15 @@ describe("points helpers", () => {
     expect(hasPointFilter('{"must":[]}')).toBe(true);
     expect(normalizePointFilterJson('{"must":[]}')).toBe('{\n  "must": []\n}');
     expect(() => buildPointScrollPayload({ filterText: "[]" })).toThrow(/Filter must be a JSON object/);
+  });
+
+  it("parses point payload objects", () => {
+    expect(parsePointPayloadInput('{"source":"edited","active":true}')).toEqual({
+      source: "edited",
+      active: true,
+    });
+    expect(parsePointPayloadInput("")).toEqual({});
+    expect(() => parsePointPayloadInput("[]")).toThrow(/Payload must be a JSON object/);
   });
 
   it("builds point query payloads with optional filter and vector name", () => {

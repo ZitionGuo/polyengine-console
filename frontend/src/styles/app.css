@@ -209,11 +209,24 @@ body {
   white-space: nowrap;
 }
 
+.collection-name-cell {
+  min-width: 220px;
+}
+
+.collection-name-cell .ant-typography {
+  white-space: nowrap;
+}
+
 .table-footer-actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
   margin-top: 12px;
+}
+
+.modal-danger-action {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .cluster-grid {
@@ -318,5 +331,47 @@ body {
 
   .page-toolbar {
     flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-sider {
+    width: 72px !important;
+    min-width: 72px !important;
+    max-width: 72px !important;
+    flex: 0 0 72px !important;
+  }
+
+  .brand {
+    justify-content: center;
+    padding: 14px;
+  }
+
+  .brand > div:last-child,
+  .nav-menu .ant-menu-title-content {
+    display: none;
+  }
+
+  .nav-menu .ant-menu-item {
+    display: grid;
+    padding-inline: 0 !important;
+    place-items: center;
+  }
+
+  .nav-menu .ant-menu-item-icon {
+    margin: 0 !important;
+  }
+
+  .app-header {
+    padding: 0 16px;
+  }
+
+  .app-content {
+    padding: 18px 14px;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
   }
 }

@@ -2,11 +2,15 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from ..models import (
     CollectionCreateRequest,
+    CollectionUpdateRequest,
     IndexCreateRequest,
     PointsDeleteRequest,
+    PointsPayloadClearRequest,
+    PointsPayloadOverwriteRequest,
     PointsQueryRequest,
     PointsRetrieveRequest,
     PointsScrollRequest,
@@ -58,6 +62,7 @@ async def create_collection(
             index_errors.append(
                 {
                     "field_name": index.field_name,
+                    "field_schema": index.field_schema,
                     "status_code": status_code,
                     "detail": detail,
                 }
@@ -76,6 +81,101 @@ async def delete_collection(
     client: QdrantClient = Depends(get_qdrant_client),
 ):
     return await client.request("DELETE", _collection_path(collection_name))
+
+
+@router.patch("/{collection_name}")
+async def update_collection(
+    collection_name: str,
+    payload: CollectionUpdateRequest,
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "PATCH",
+        _collection_path(collection_name),
+        json=payload.model_dump(exclude_none=True),
+    )
+
+
+@router.get("/{collection_name}/snapshots")
+async def list_collection_snapshots(
+    collection_name: str,
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "GET",
+        _collection_path(collection_name, "/snapshots"),
+    )
+
+
+@router.post("/{collection_name}/snapshots")
+async def create_collection_snapshot(
+    collection_name: str,
+    wait: bool = Query(default=True),
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "POST",
+        _collection_path(collection_name, "/snapshots"),
+        params={"wait": wait},
+    )
+
+
+@router.get("/{collection_name}/snapshots/{snapshot_name}")
+async def download_collection_snapshot(
+    collection_name: str,
+    snapshot_name: str,
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    snapshot = await client.stream(
+        "GET",
+        _collection_path(
+            collection_name,
+            f"/snapshots/{quote(snapshot_name, safe='')}",
+        ),
+    )
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(snapshot_name, safe='')}",
+    }
+    if snapshot.content_length:
+        headers["Content-Length"] = snapshot.content_length
+    return StreamingResponse(
+        snapshot.body,
+        media_type=snapshot.content_type,
+        headers=headers,
+    )
+
+
+@router.delete("/{collection_name}/snapshots/{snapshot_name}")
+async def delete_collection_snapshot(
+    collection_name: str,
+    snapshot_name: str,
+    wait: bool = Query(default=True),
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "DELETE",
+        _collection_path(
+            collection_name,
+            f"/snapshots/{quote(snapshot_name, safe='')}",
+        ),
+        params={"wait": wait},
+    )
+
+
+@router.get("/{collection_name}/optimizations")
+async def get_collection_optimizations(
+    collection_name: str,
+    completed_limit: int = Query(default=8, ge=0, le=100),
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "GET",
+        _collection_path(collection_name, "/optimizations"),
+        params={
+            "with": "queued,completed,idle_segments",
+            "completed_limit": completed_limit,
+        },
+    )
 
 
 @router.put("/{collection_name}/indexes")
@@ -155,6 +255,46 @@ async def upsert_points(
             if value is not None
         },
         json=payload.model_dump(exclude_none=True),
+    )
+
+
+@router.put("/{collection_name}/points/payload")
+async def overwrite_point_payload(
+    collection_name: str,
+    payload: PointsPayloadOverwriteRequest,
+    wait: bool | None = Query(default=True),
+    ordering: str | None = Query(default=None, pattern="^(weak|medium|strong)$"),
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "PUT",
+        _collection_path(collection_name, "/points/payload"),
+        params={
+            key: value
+            for key, value in {"wait": wait, "ordering": ordering}.items()
+            if value is not None
+        },
+        json=payload.model_dump(),
+    )
+
+
+@router.post("/{collection_name}/points/payload/clear")
+async def clear_point_payload(
+    collection_name: str,
+    payload: PointsPayloadClearRequest,
+    wait: bool | None = Query(default=True),
+    ordering: str | None = Query(default=None, pattern="^(weak|medium|strong)$"),
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "POST",
+        _collection_path(collection_name, "/points/payload/clear"),
+        params={
+            key: value
+            for key, value in {"wait": wait, "ordering": ordering}.items()
+            if value is not None
+        },
+        json=payload.model_dump(),
     )
 
 

@@ -57,6 +57,26 @@ describe("api service", () => {
     );
   });
 
+  it("builds snapshot download URLs and loads optimization progress", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "ok", result: { running: [] } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(api.collectionSnapshotDownloadUrl("docs 2026", "nightly #1.snapshot")).toBe(
+      "/api/collections/docs%202026/snapshots/nightly%20%231.snapshot",
+    );
+    await api.getCollectionOptimizations("docs 2026", 5);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/collections/docs%202026/optimizations?completed_limit=5",
+      expect.any(Object),
+    );
+  });
+
   it("calls the points scroll endpoint", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ status: "ok", result: { points: [] } }), {
@@ -195,6 +215,46 @@ describe("api service", () => {
         body: JSON.stringify({
           points: [{ id: 1, vector: [0.1, 0.2], payload: { source: "manual" } }],
         }),
+      }),
+    );
+  });
+
+  it("calls point payload overwrite and clear endpoints", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ status: "ok" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.overwritePointPayload("docs", {
+      pointId: "point-1",
+      payload: { source: "edited" },
+      wait: true,
+      ordering: "medium",
+    });
+    await api.clearPointPayload("docs", { pointId: "point-1", wait: true });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/collections/docs/points/payload?wait=true&ordering=medium",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          points: ["point-1"],
+          payload: { source: "edited" },
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/collections/docs/points/payload/clear?wait=true",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ points: ["point-1"] }),
       }),
     );
   });

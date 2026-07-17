@@ -16,6 +16,61 @@ export interface AliasSummary {
   collection_name: string;
 }
 
+export interface CollectionSnapshot {
+  name: string;
+  size: number;
+  creation_time: string;
+  checksum?: string;
+}
+
+export interface CollectionIndexError {
+  field_name: string;
+  field_schema: unknown;
+  status_code?: number | null;
+  detail?: unknown;
+}
+
+export interface CollectionCreateResult {
+  collection: unknown;
+  indexes: unknown[];
+  index_errors: CollectionIndexError[];
+}
+
+export interface OptimizationSegment {
+  uuid?: string;
+  points_count?: number;
+}
+
+export interface OptimizationProgress {
+  name?: string;
+  started_at?: string;
+  finished_at?: string;
+  duration_sec?: number;
+  done?: number;
+  total?: number;
+}
+
+export interface OptimizationItem {
+  uuid?: string;
+  optimizer?: string;
+  status?: string;
+  segments?: OptimizationSegment[];
+  progress?: OptimizationProgress;
+}
+
+export interface CollectionOptimizations {
+  summary?: {
+    queued_optimizations?: number;
+    queued_segments?: number;
+    queued_points?: number;
+    idle_segments?: number;
+  };
+  running?: OptimizationItem[];
+  queued?: OptimizationItem[];
+  completed?: OptimizationItem[];
+  idle_segments?: OptimizationSegment[];
+}
+
 export interface RestProxyPayload {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
@@ -57,6 +112,19 @@ export interface PointsDeletePayload {
 
 export interface PointsUpsertPayload {
   points: Array<Record<string, unknown>>;
+  wait?: boolean;
+  ordering?: "weak" | "medium" | "strong";
+}
+
+export interface PointsPayloadOverwritePayload {
+  pointId: unknown;
+  payload: Record<string, unknown>;
+  wait?: boolean;
+  ordering?: "weak" | "medium" | "strong";
+}
+
+export interface PointsPayloadClearPayload {
+  pointId: unknown;
   wait?: boolean;
   ordering?: "weak" | "medium" | "strong";
 }
@@ -135,11 +203,7 @@ export const api = {
     request<QdrantEnvelope<Record<string, unknown>>>(`/api/collections/${encodeURIComponent(name)}`),
 
   createCollection: (name: string, body: CollectionCreateBody) =>
-    request<{
-      collection: unknown;
-      indexes: unknown[];
-      index_errors: unknown[];
-    }>(`/api/collections/${encodeURIComponent(name)}`, {
+    request<CollectionCreateResult>(`/api/collections/${encodeURIComponent(name)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -148,6 +212,39 @@ export const api = {
     request<QdrantEnvelope>(`/api/collections/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
+
+  updateCollection: (name: string, body: Record<string, unknown>) =>
+    request<QdrantEnvelope>(`/api/collections/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  listCollectionSnapshots: (name: string) =>
+    request<QdrantEnvelope<CollectionSnapshot[]>>(
+      `/api/collections/${encodeURIComponent(name)}/snapshots`,
+    ),
+
+  createCollectionSnapshot: (name: string) =>
+    request<QdrantEnvelope<CollectionSnapshot>>(
+      `/api/collections/${encodeURIComponent(name)}/snapshots?wait=true`,
+      { method: "POST" },
+    ),
+
+  collectionSnapshotDownloadUrl: (name: string, snapshotName: string) =>
+    `/api/collections/${encodeURIComponent(name)}/snapshots/${encodeURIComponent(snapshotName)}`,
+
+  deleteCollectionSnapshot: (name: string, snapshotName: string) =>
+    request<QdrantEnvelope>(
+      `/api/collections/${encodeURIComponent(name)}/snapshots/${encodeURIComponent(snapshotName)}?wait=true`,
+      { method: "DELETE" },
+    ),
+
+  getCollectionOptimizations: (name: string, completedLimit = 8) =>
+    request<QdrantEnvelope<CollectionOptimizations>>(
+      `/api/collections/${encodeURIComponent(name)}/optimizations?${new URLSearchParams({
+        completed_limit: String(completedLimit),
+      })}`,
+    ),
 
   createIndex: (collectionName: string, fieldName: string, fieldSchema: unknown) =>
     request<QdrantEnvelope>(`/api/collections/${encodeURIComponent(collectionName)}/indexes`, {
@@ -209,6 +306,33 @@ export const api = {
       {
         method: "PUT",
         body: JSON.stringify({ points: payload.points }),
+      },
+    ),
+
+  overwritePointPayload: (
+    collectionName: string,
+    payload: PointsPayloadOverwritePayload,
+  ) =>
+    request<QdrantEnvelope>(
+      `/api/collections/${encodeURIComponent(collectionName)}/points/payload?${new URLSearchParams({
+        wait: String(payload.wait ?? true),
+        ...(payload.ordering ? { ordering: payload.ordering } : {}),
+      })}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ points: [payload.pointId], payload: payload.payload }),
+      },
+    ),
+
+  clearPointPayload: (collectionName: string, payload: PointsPayloadClearPayload) =>
+    request<QdrantEnvelope>(
+      `/api/collections/${encodeURIComponent(collectionName)}/points/payload/clear?${new URLSearchParams({
+        wait: String(payload.wait ?? true),
+        ...(payload.ordering ? { ordering: payload.ordering } : {}),
+      })}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ points: [payload.pointId] }),
       },
     ),
 

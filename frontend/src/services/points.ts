@@ -59,6 +59,8 @@ const compactObject = <T extends Record<string, unknown>>(input: T): Partial<T> 
 
 export const parsePointFilter = (value: string) => parseJsonObject(value, "Filter");
 
+export const parsePointPayloadInput = (value: string) => parseJsonObject(value, "Payload");
+
 export const normalizePointFilterJson = (value: string) =>
   JSON.stringify(parsePointFilter(value), null, 2);
 

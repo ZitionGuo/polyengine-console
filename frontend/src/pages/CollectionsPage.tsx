@@ -12,6 +12,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Progress,
   Radio,
   Select,
   Space,
@@ -24,12 +25,33 @@ import {
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Eye, Filter, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import {
+  Camera,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  Download,
+  Eye,
+  Filter,
+  Plus,
+  Pencil,
+  RefreshCw,
+  Search,
+  Settings,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 
 import { JsonView } from "../components/JsonView";
 import { PageToolbar } from "../components/PageToolbar";
-import { api, type AliasSummary, type CollectionSummary } from "../services/api";
+import {
+  api,
+  type AliasSummary,
+  type CollectionSnapshot,
+  type CollectionSummary,
+  type OptimizationItem,
+} from "../services/api";
 import {
   buildCollectionCreatePayload,
   buildIndexSchema,
@@ -37,6 +59,15 @@ import {
   type IndexInput,
   type PayloadIndexType,
 } from "../services/collectionPayload";
+import {
+  buildRetryableIndexFailures,
+  parseRetryIndexSchema,
+  type RetryableIndexFailure,
+} from "../services/collectionCreateResult";
+import {
+  buildCollectionUpdatePayload,
+  type CollectionUpdateFormValues,
+} from "../services/collectionUpdate";
 import {
   buildPointRetrievePayload,
   buildPointScrollPayload,
@@ -47,6 +78,7 @@ import {
   defaultPointsJson,
   hasPointFilter,
   normalizePointFilterJson,
+  parsePointPayloadInput,
   parseUpsertPointsInput,
 } from "../services/points";
 
@@ -91,6 +123,7 @@ interface CollectionDetailsProps {
   onAddAlias: () => void;
   onAddIndex: () => void;
   onDeleteIndex: (fieldName: string) => void;
+  onEditSettings: () => void;
 }
 
 const asRecord = (value: unknown): AnyRecord =>
@@ -226,6 +259,7 @@ const CollectionDetails = ({
   onAddAlias,
   onAddIndex,
   onDeleteIndex,
+  onEditSettings,
 }: CollectionDetailsProps) => {
   const details = unwrapResult(data);
   const config = asRecord(details.config);
@@ -282,19 +316,29 @@ const CollectionDetails = ({
         </div>
       </div>
 
-      <Descriptions
-        bordered
-        size="small"
-        column={2}
-        items={[
-          { key: "optimizer", label: "Optimizer", children: displayValue(details.optimizer_status) },
-          { key: "shards", label: "Shards", children: displayValue(params.shard_number) },
-          { key: "replicas", label: "Replicas", children: displayValue(params.replication_factor) },
-          { key: "write", label: "Write consistency", children: displayValue(params.write_consistency_factor) },
-          { key: "payload", label: "On-disk payload", children: displayValue(params.on_disk_payload) },
-          { key: "queue", label: "Update queue", children: displayValue(asRecord(details.update_queue).length) },
-        ]}
-      />
+      <section>
+        <div className="section-heading">
+          <Typography.Title level={4}>Configuration</Typography.Title>
+          <Button icon={<Settings size={16} />} onClick={onEditSettings}>
+            Edit settings
+          </Button>
+        </div>
+        <Descriptions
+          bordered
+          size="small"
+          column={{ xs: 1, sm: 2 }}
+          items={[
+            { key: "optimizer", label: "Optimizer", children: displayValue(details.optimizer_status) },
+            { key: "shards", label: "Shards", children: displayValue(params.shard_number) },
+            { key: "replicas", label: "Replicas", children: displayValue(params.replication_factor) },
+            { key: "write", label: "Write consistency", children: displayValue(params.write_consistency_factor) },
+            { key: "payload", label: "On-disk payload", children: displayValue(params.on_disk_payload) },
+            { key: "queue", label: "Update queue", children: displayValue(asRecord(details.update_queue).length) },
+          ]}
+        />
+      </section>
+
+      <CollectionOptimizationsPanel collectionName={collectionName} />
 
       <section>
         <div className="section-heading">
@@ -354,6 +398,8 @@ const CollectionDetails = ({
         )}
       </section>
 
+      <CollectionSnapshots collectionName={collectionName} />
+
       <CollectionPointsPreview collectionName={collectionName} vectorOptions={denseVectorOptions} />
 
       <Collapse
@@ -366,7 +412,7 @@ const CollectionDetails = ({
               <Descriptions
                 bordered
                 size="small"
-                column={2}
+                column={{ xs: 1, sm: 2 }}
                 items={[
                   { key: "hnsw-m", label: "HNSW m", children: displayValue(hnsw.m) },
                   { key: "hnsw-ef", label: "HNSW ef construct", children: displayValue(hnsw.ef_construct) },
@@ -389,6 +435,334 @@ const CollectionDetails = ({
   );
 };
 
+interface OptimizationRow extends OptimizationItem {
+  key: string;
+  state: "running" | "queued" | "completed";
+}
+
+const CollectionOptimizationsPanel = ({ collectionName }: { collectionName: string }) => {
+  const optimizationsQuery = useQuery({
+    queryKey: ["collections", collectionName, "optimizations"],
+    queryFn: () => api.getCollectionOptimizations(collectionName),
+    refetchInterval: (query) => {
+      const result = query.state.data?.result;
+      const activeCount =
+        (result?.running?.length ?? 0) + (result?.summary?.queued_optimizations ?? 0);
+      return activeCount > 0 ? 3_000 : false;
+    },
+  });
+  const result = optimizationsQuery.data?.result;
+  const summary = result?.summary;
+  const buildRows = (
+    items: OptimizationItem[] | undefined,
+    state: OptimizationRow["state"],
+  ): OptimizationRow[] =>
+    (items ?? []).map((item, index) => ({
+      ...item,
+      key: item.uuid ?? `${state}-${index}`,
+      state,
+    }));
+  const activeRows = [
+    ...buildRows(result?.running, "running"),
+    ...buildRows(result?.queued, "queued"),
+  ];
+  const completedRows = buildRows(result?.completed, "completed");
+  const columns: ColumnsType<OptimizationRow> = [
+    {
+      title: "Optimizer",
+      dataIndex: "optimizer",
+      width: 170,
+      render: (value: string | undefined, row) =>
+        value ?? row.progress?.name ?? "Qdrant optimizer",
+    },
+    {
+      title: "State",
+      dataIndex: "state",
+      width: 100,
+      render: (value: OptimizationRow["state"], row) => (
+        <Tag color={value === "running" ? "blue" : value === "queued" ? "orange" : "green"}>
+          {row.status ?? value}
+        </Tag>
+      ),
+    },
+    {
+      title: "Segments",
+      width: 90,
+      render: (_, row) => row.segments?.length ?? 0,
+    },
+    {
+      title: "Points",
+      width: 100,
+      render: (_, row) =>
+        (row.segments ?? []).reduce((total, segment) => total + (segment.points_count ?? 0), 0),
+    },
+    {
+      title: "Progress",
+      width: 170,
+      render: (_, row) => {
+        const done = row.progress?.done;
+        const total = row.progress?.total;
+        if (typeof done !== "number" || typeof total !== "number" || total <= 0) {
+          return row.state === "completed" ? "Complete" : "Waiting";
+        }
+        return (
+          <Progress
+            percent={Math.min(100, Math.round((done / total) * 100))}
+            size="small"
+            status={row.state === "completed" ? "success" : "active"}
+          />
+        );
+      },
+    },
+  ];
+
+  return (
+    <section>
+      <div className="section-heading">
+        <Typography.Title level={4}>Optimization activity</Typography.Title>
+        <Tooltip title="Refresh optimization progress">
+          <Button
+            icon={<RefreshCw size={16} />}
+            loading={optimizationsQuery.isFetching}
+            onClick={() => optimizationsQuery.refetch()}
+          />
+        </Tooltip>
+      </div>
+      {optimizationsQuery.isError ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="Unable to load optimization progress"
+          description={
+            optimizationsQuery.error instanceof Error
+              ? optimizationsQuery.error.message
+              : undefined
+          }
+        />
+      ) : (
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Descriptions
+            bordered
+            size="small"
+            column={{ xs: 2, sm: 4 }}
+            items={[
+              {
+                key: "running",
+                label: "Running",
+                children: result?.running?.length ?? 0,
+              },
+              {
+                key: "queued",
+                label: "Queued",
+                children: summary?.queued_optimizations ?? 0,
+              },
+              {
+                key: "queued-points",
+                label: "Queued points",
+                children: summary?.queued_points ?? 0,
+              },
+              {
+                key: "idle",
+                label: "Idle segments",
+                children: summary?.idle_segments ?? result?.idle_segments?.length ?? 0,
+              },
+            ]}
+          />
+          {activeRows.length ? (
+            <Table
+              rowKey="key"
+              size="small"
+              columns={columns}
+              dataSource={activeRows}
+              pagination={false}
+              scroll={{ x: 630 }}
+            />
+          ) : !optimizationsQuery.isLoading ? (
+            <Alert
+              type="success"
+              showIcon
+              message="Optimization queue is idle"
+              description="Qdrant is not currently merging, indexing, or rebuilding collection segments."
+            />
+          ) : null}
+          {completedRows.length ? (
+            <Collapse
+              size="small"
+              items={[
+                {
+                  key: "completed",
+                  label: `Recent completed optimizations (${completedRows.length})`,
+                  children: (
+                    <Table
+                      rowKey="key"
+                      size="small"
+                      columns={columns}
+                      dataSource={completedRows}
+                      pagination={false}
+                      scroll={{ x: 630 }}
+                    />
+                  ),
+                },
+              ]}
+            />
+          ) : null}
+        </Space>
+      )}
+    </section>
+  );
+};
+
+const formatBytes = (size: number) => {
+  if (!Number.isFinite(size) || size <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const unitIndex = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1);
+  const value = size / 1024 ** unitIndex;
+  return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+};
+
+const CollectionSnapshots = ({ collectionName }: { collectionName: string }) => {
+  const { message, modal } = AntApp.useApp();
+  const queryClient = useQueryClient();
+  const snapshotsQuery = useQuery({
+    queryKey: ["collections", collectionName, "snapshots"],
+    queryFn: () => api.listCollectionSnapshots(collectionName),
+  });
+  const createSnapshotMutation = useMutation({
+    mutationFn: () => api.createCollectionSnapshot(collectionName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["collections", collectionName, "snapshots"] });
+      message.success("Snapshot created.");
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : "Failed to create snapshot.");
+    },
+  });
+  const deleteSnapshotMutation = useMutation({
+    mutationFn: (snapshotName: string) =>
+      api.deleteCollectionSnapshot(collectionName, snapshotName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["collections", collectionName, "snapshots"] });
+      message.success("Snapshot deleted.");
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : "Failed to delete snapshot.");
+    },
+  });
+  const snapshots = snapshotsQuery.data?.result ?? [];
+  const columns: ColumnsType<CollectionSnapshot> = [
+    {
+      title: "Snapshot",
+      dataIndex: "name",
+      render: (name: string, snapshot) => (
+        <Space direction="vertical" size={0} className="snapshot-name">
+          <Typography.Text strong ellipsis={{ tooltip: name }}>
+            {name}
+          </Typography.Text>
+          {snapshot.checksum ? (
+            <Typography.Text type="secondary" ellipsis={{ tooltip: snapshot.checksum }}>
+              {snapshot.checksum}
+            </Typography.Text>
+          ) : null}
+        </Space>
+      ),
+    },
+    {
+      title: "Created",
+      dataIndex: "creation_time",
+      width: 190,
+      render: (value: string) => (value ? new Date(value).toLocaleString() : "-"),
+    },
+    {
+      title: "Size",
+      dataIndex: "size",
+      width: 100,
+      render: (value: number) => formatBytes(value),
+    },
+    {
+      title: "Actions",
+      width: 116,
+      align: "right",
+      render: (_, snapshot) => (
+        <Space size={6}>
+          <Tooltip title="Download snapshot">
+            <Button
+              aria-label={`Download snapshot ${snapshot.name}`}
+              icon={<Download size={16} />}
+              href={api.collectionSnapshotDownloadUrl(collectionName, snapshot.name)}
+              download={snapshot.name}
+            />
+          </Tooltip>
+          <Tooltip title="Delete snapshot">
+            <Button
+              danger
+              aria-label={`Delete snapshot ${snapshot.name}`}
+              icon={<Trash2 size={16} />}
+              loading={
+                deleteSnapshotMutation.isPending &&
+                deleteSnapshotMutation.variables === snapshot.name
+              }
+              onClick={() =>
+                modal.confirm({
+                  title: `Delete snapshot ${snapshot.name}?`,
+                  content: "This removes the snapshot file from Qdrant storage.",
+                  okText: "Delete",
+                  okButtonProps: { danger: true },
+                  onOk: () => deleteSnapshotMutation.mutateAsync(snapshot.name),
+                })
+              }
+            />
+          </Tooltip>
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <section>
+      <div className="section-heading">
+        <Typography.Title level={4}>Snapshots</Typography.Title>
+        <Space>
+          <Tooltip title="Refresh snapshots">
+            <Button
+              icon={<RefreshCw size={16} />}
+              loading={snapshotsQuery.isFetching}
+              onClick={() => snapshotsQuery.refetch()}
+            />
+          </Tooltip>
+          <Button
+            icon={<Camera size={16} />}
+            loading={createSnapshotMutation.isPending}
+            onClick={() => createSnapshotMutation.mutate()}
+          >
+            Create snapshot
+          </Button>
+        </Space>
+      </div>
+      {snapshotsQuery.isError ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="Unable to load snapshots"
+          description={
+            snapshotsQuery.error instanceof Error ? snapshotsQuery.error.message : undefined
+          }
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
+      <Table
+        rowKey="name"
+        size="small"
+        columns={columns}
+        dataSource={snapshots}
+        loading={snapshotsQuery.isLoading}
+        pagination={false}
+        scroll={{ x: 620 }}
+        locale={{ emptyText: snapshotsQuery.isError ? "Snapshots unavailable" : "No snapshots yet" }}
+      />
+    </section>
+  );
+};
+
 const CollectionPointsPreview = ({
   collectionName,
   vectorOptions,
@@ -400,6 +774,7 @@ const CollectionPointsPreview = ({
   const queryClient = useQueryClient();
   const [limit, setLimit] = useState(10);
   const [offset, setOffset] = useState<unknown>(undefined);
+  const [offsetHistory, setOffsetHistory] = useState<unknown[]>([]);
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterDraftJson, setFilterDraftJson] = useState(defaultPointFilterJson);
   const [activeFilterJson, setActiveFilterJson] = useState(defaultPointFilterJson);
@@ -414,7 +789,17 @@ const CollectionPointsPreview = ({
   const [searchLimit, setSearchLimit] = useState(10);
   const [searchUsing, setSearchUsing] = useState<string | undefined>(undefined);
   const [searchWithVector, setSearchWithVector] = useState(false);
+  const [payloadPoint, setPayloadPoint] = useState<PointRow | null>(null);
+  const [payloadJson, setPayloadJson] = useState("{}");
   const filterActive = hasPointFilter(activeFilterJson);
+  const resetPagination = () => {
+    setOffset(undefined);
+    setOffsetHistory([]);
+  };
+  const invalidatePointData = () => {
+    queryClient.invalidateQueries({ queryKey: ["collections", collectionName, "points"] });
+    queryClient.invalidateQueries({ queryKey: ["collections", collectionName] });
+  };
   const pointsQuery = useQuery({
     queryKey: ["collections", collectionName, "points", limit, offset, activeFilterJson],
     queryFn: () =>
@@ -435,8 +820,7 @@ const CollectionPointsPreview = ({
         wait: true,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["collections", collectionName, "points"] });
-      queryClient.invalidateQueries({ queryKey: ["collections", collectionName] });
+      invalidatePointData();
       message.success("Point deleted.");
     },
     onError: (error) => {
@@ -451,9 +835,8 @@ const CollectionPointsPreview = ({
     },
     onSuccess: () => {
       setUpsertOpen(false);
-      setOffset(undefined);
-      queryClient.invalidateQueries({ queryKey: ["collections", collectionName, "points"] });
-      queryClient.invalidateQueries({ queryKey: ["collections", collectionName] });
+      resetPagination();
+      invalidatePointData();
       message.success("Points upserted.");
     },
     onError: (error) => {
@@ -492,6 +875,43 @@ const CollectionPointsPreview = ({
     },
   });
 
+  const overwritePayloadMutation = useMutation({
+    mutationFn: async () => {
+      if (!payloadPoint) throw new Error("Point is required.");
+      return api.overwritePointPayload(collectionName, {
+        pointId: payloadPoint.pointId,
+        payload: parsePointPayloadInput(payloadJson),
+        wait: true,
+      });
+    },
+    onSuccess: () => {
+      setPayloadPoint(null);
+      invalidatePointData();
+      message.success("Point payload replaced.");
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : "Failed to replace point payload.");
+    },
+  });
+
+  const clearPayloadMutation = useMutation({
+    mutationFn: async () => {
+      if (!payloadPoint) throw new Error("Point is required.");
+      return api.clearPointPayload(collectionName, {
+        pointId: payloadPoint.pointId,
+        wait: true,
+      });
+    },
+    onSuccess: () => {
+      setPayloadPoint(null);
+      invalidatePointData();
+      message.success("Point payload cleared.");
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : "Failed to clear point payload.");
+    },
+  });
+
   const confirmDeletePoint = (row: PointRow) => {
     modal.confirm({
       title: `Delete point ${row.id}?`,
@@ -502,12 +922,29 @@ const CollectionPointsPreview = ({
     });
   };
 
+  const openPayloadEditor = (row: PointRow) => {
+    const payload = asRecord(asRecord(row.raw).payload);
+    setPayloadJson(JSON.stringify(payload, null, 2));
+    setPayloadPoint(row);
+  };
+
+  const confirmClearPayload = () => {
+    if (!payloadPoint) return;
+    modal.confirm({
+      title: `Clear payload for point ${payloadPoint.id}?`,
+      content: "The point and its vectors remain; only its payload fields are removed.",
+      okText: "Clear payload",
+      okButtonProps: { danger: true },
+      onOk: () => clearPayloadMutation.mutateAsync(),
+    });
+  };
+
   const applyScrollFilter = () => {
     try {
       const normalized = normalizePointFilterJson(filterDraftJson);
       setActiveFilterJson(normalized);
       setFilterDraftJson(normalized);
-      setOffset(undefined);
+      resetPagination();
       setFilterOpen(false);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "Invalid filter JSON.");
@@ -517,7 +954,18 @@ const CollectionPointsPreview = ({
   const clearScrollFilter = () => {
     setActiveFilterJson(defaultPointFilterJson);
     setFilterDraftJson(defaultPointFilterJson);
-    setOffset(undefined);
+    resetPagination();
+  };
+
+  const goToPreviousPage = () => {
+    const previousOffset = offsetHistory[offsetHistory.length - 1];
+    setOffsetHistory((current) => current.slice(0, -1));
+    setOffset(previousOffset);
+  };
+
+  const goToNextPage = () => {
+    setOffsetHistory((current) => [...current, offset]);
+    setOffset(nextOffset);
   };
 
   const pointColumns: ColumnsType<PointRow> = [
@@ -539,18 +987,27 @@ const CollectionPointsPreview = ({
     { title: "Vector", dataIndex: "vector", width: 120 },
     {
       title: "Actions",
-      width: 96,
+      width: 132,
       align: "right",
       render: (_, row) => (
-        <Tooltip title="Delete point">
-          <Button
-            danger
-            aria-label={`Delete point ${row.id}`}
-            icon={<Trash2 size={16} />}
-            loading={deletePointMutation.isPending && deletePointMutation.variables === row.pointId}
-            onClick={() => confirmDeletePoint(row)}
-          />
-        </Tooltip>
+        <Space size={6}>
+          <Tooltip title="Edit payload">
+            <Button
+              aria-label={`Edit payload for point ${row.id}`}
+              icon={<Pencil size={16} />}
+              onClick={() => openPayloadEditor(row)}
+            />
+          </Tooltip>
+          <Tooltip title="Delete point">
+            <Button
+              danger
+              aria-label={`Delete point ${row.id}`}
+              icon={<Trash2 size={16} />}
+              loading={deletePointMutation.isPending && deletePointMutation.variables === row.pointId}
+              onClick={() => confirmDeletePoint(row)}
+            />
+          </Tooltip>
+        </Space>
       ),
     },
   ];
@@ -636,7 +1093,7 @@ const CollectionPointsPreview = ({
             value={limit}
             onChange={(value) => {
               setLimit(value ?? 10);
-              setOffset(undefined);
+              resetPagination();
             }}
           />
           <Tooltip title="Refresh points">
@@ -664,23 +1121,72 @@ const CollectionPointsPreview = ({
         dataSource={pointRows}
         loading={pointsQuery.isLoading || pointsQuery.isFetching}
         pagination={false}
+        scroll={{ x: 760 }}
         expandable={{
           expandedRowRender: (row) => <JsonView data={row.raw} minHeight={140} />,
         }}
         locale={{ emptyText: pointsQuery.isError ? "Unable to load points" : "No points returned" }}
       />
       <div className="table-footer-actions">
-        <Button disabled={offset === undefined} onClick={() => setOffset(undefined)}>
-          First page
-        </Button>
-        <Button
-          type="primary"
-          disabled={nextOffset === undefined || nextOffset === null}
-          onClick={() => setOffset(nextOffset)}
-        >
-          Next page
-        </Button>
+        <Tooltip title="First page">
+          <Button
+            aria-label="First page"
+            icon={<ChevronsLeft size={16} />}
+            disabled={!offsetHistory.length}
+            onClick={resetPagination}
+          />
+        </Tooltip>
+        <Tooltip title="Previous page">
+          <Button
+            aria-label="Previous page"
+            icon={<ChevronLeft size={16} />}
+            disabled={!offsetHistory.length}
+            onClick={goToPreviousPage}
+          />
+        </Tooltip>
+        <Tooltip title="Next page">
+          <Button
+            type="primary"
+            aria-label="Next page"
+            icon={<ChevronRight size={16} />}
+            disabled={nextOffset === undefined || nextOffset === null}
+            onClick={goToNextPage}
+          />
+        </Tooltip>
       </div>
+      <Modal
+        title={`Edit payload for point ${payloadPoint?.id ?? ""}`}
+        open={Boolean(payloadPoint)}
+        okText="Replace payload"
+        width={700}
+        confirmLoading={overwritePayloadMutation.isPending}
+        onOk={() => overwritePayloadMutation.mutate()}
+        onCancel={() => setPayloadPoint(null)}
+      >
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Alert
+            type="info"
+            showIcon
+            message="This replaces the entire payload; the point ID and vectors stay unchanged."
+          />
+          <Input.TextArea
+            value={payloadJson}
+            rows={12}
+            spellCheck={false}
+            onChange={(event) => setPayloadJson(event.target.value)}
+          />
+          <div className="modal-danger-action">
+            <Button
+              danger
+              icon={<Trash2 size={16} />}
+              loading={clearPayloadMutation.isPending}
+              onClick={confirmClearPayload}
+            >
+              Clear payload
+            </Button>
+          </div>
+        </Space>
+      </Modal>
       <Modal
         title={`Filter points in ${collectionName}`}
         open={filterOpen}
@@ -914,10 +1420,17 @@ export const CollectionsPage = () => {
   const [createOpen, setCreateOpen] = useState(false);
   const [indexOpen, setIndexOpen] = useState(false);
   const [aliasOpen, setAliasOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [indexFailuresOpen, setIndexFailuresOpen] = useState(false);
+  const [indexFailures, setIndexFailures] = useState<RetryableIndexFailure[]>([]);
+  const [retryFailure, setRetryFailure] = useState<RetryableIndexFailure | null>(null);
+  const [retryFieldName, setRetryFieldName] = useState("");
+  const [retrySchemaJson, setRetrySchemaJson] = useState("");
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
   const [form] = Form.useForm<CollectionFormValues>();
   const [indexForm] = Form.useForm<IndexInput>();
   const [aliasForm] = Form.useForm<{ aliasName: string }>();
+  const [settingsForm] = Form.useForm<CollectionUpdateFormValues>();
   const vectorMode = Form.useWatch("vectorMode", form) ?? "single";
   const indexType = Form.useWatch("type", indexForm);
 
@@ -941,16 +1454,25 @@ export const CollectionsPage = () => {
   const createMutation = useMutation({
     mutationFn: async (values: CollectionFormValues) => {
       const { name, body } = buildCollectionCreatePayload(values);
-      return api.createCollection(name, body);
+      return { name, result: await api.createCollection(name, body) };
     },
-    onSuccess: (result) => {
+    onSuccess: ({ name, result }) => {
       setCreateOpen(false);
       form.resetFields();
       queryClient.invalidateQueries({ queryKey: ["collections"] });
       if (result.index_errors.length) {
+        const failures = buildRetryableIndexFailures(name, result.index_errors);
+        setIndexFailures((current) => [
+          ...current.filter((failure) => failure.collectionName !== name),
+          ...failures,
+        ]);
+        setIndexFailuresOpen(true);
         message.warning("Collection created, but one or more payload indexes failed.");
         return;
       }
+      setIndexFailures((current) =>
+        current.filter((failure) => failure.collectionName !== name),
+      );
       message.success("Collection created.");
     },
     onError: (error) => {
@@ -1012,6 +1534,31 @@ export const CollectionsPage = () => {
     },
   });
 
+  const retryIndexMutation = useMutation({
+    mutationFn: async ({
+      failure,
+      fieldName,
+      fieldSchema,
+    }: {
+      failure: RetryableIndexFailure;
+      fieldName: string;
+      fieldSchema: unknown;
+    }) => api.createIndex(failure.collectionName, fieldName, fieldSchema),
+    onSuccess: (_, variables) => {
+      setIndexFailures((current) =>
+        current.filter((failure) => failure.key !== variables.failure.key),
+      );
+      queryClient.invalidateQueries({
+        queryKey: ["collections", variables.failure.collectionName],
+      });
+      setRetryFailure(null);
+      message.success("Payload index created.");
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : "Failed to create payload index.");
+    },
+  });
+
   const deleteIndexMutation = useMutation({
     mutationFn: async (fieldName: string) => {
       if (!selectedCollection) {
@@ -1030,6 +1577,28 @@ export const CollectionsPage = () => {
     },
   });
 
+  const updateCollectionMutation = useMutation({
+    mutationFn: async (values: CollectionUpdateFormValues) => {
+      if (!selectedCollection) {
+        throw new Error("Collection is required.");
+      }
+      return api.updateCollection(
+        selectedCollection,
+        buildCollectionUpdatePayload(values),
+      );
+    },
+    onSuccess: () => {
+      if (selectedCollection) {
+        queryClient.invalidateQueries({ queryKey: ["collections", selectedCollection] });
+      }
+      setSettingsOpen(false);
+      message.success("Collection settings updated.");
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : "Failed to update collection settings.");
+    },
+  });
+
   const openIndexModal = () => {
     indexForm.setFieldsValue({ type: "keyword" });
     setIndexOpen(true);
@@ -1038,6 +1607,62 @@ export const CollectionsPage = () => {
   const openAliasModal = () => {
     aliasForm.resetFields();
     setAliasOpen(true);
+  };
+
+  const openSettingsModal = () => {
+    const details = unwrapResult(detailsQuery.data);
+    const config = asRecord(details.config);
+    const params = asRecord(config.params);
+    const optimizer = asRecord(config.optimizer_config);
+    const hnsw = asRecord(config.hnsw_config);
+    settingsForm.setFieldsValue({
+      replicationFactor:
+        typeof params.replication_factor === "number" ? params.replication_factor : undefined,
+      writeConsistencyFactor:
+        typeof params.write_consistency_factor === "number"
+          ? params.write_consistency_factor
+          : undefined,
+      onDiskPayload:
+        typeof params.on_disk_payload === "boolean" ? params.on_disk_payload : undefined,
+      indexingThreshold:
+        typeof optimizer.indexing_threshold === "number"
+          ? optimizer.indexing_threshold
+          : undefined,
+      flushIntervalSec:
+        typeof optimizer.flush_interval_sec === "number"
+          ? optimizer.flush_interval_sec
+          : undefined,
+      hnswM: typeof hnsw.m === "number" ? hnsw.m : undefined,
+      hnswEfConstruct:
+        typeof hnsw.ef_construct === "number" ? hnsw.ef_construct : undefined,
+      advancedJson: "",
+    });
+    setSettingsOpen(true);
+  };
+
+  const openRetryIndexModal = (failure: RetryableIndexFailure) => {
+    setRetryFieldName(failure.fieldName);
+    setRetrySchemaJson(JSON.stringify(failure.fieldSchema, null, 2) ?? "");
+    setRetryFailure(failure);
+  };
+
+  const submitRetryIndex = () => {
+    if (!retryFailure) return;
+    const fieldName = retryFieldName.trim();
+    if (!fieldName) {
+      message.error("Field name is required.");
+      return;
+    }
+
+    try {
+      retryIndexMutation.mutate({
+        failure: retryFailure,
+        fieldName,
+        fieldSchema: parseRetryIndexSchema(retrySchemaJson),
+      });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Invalid index schema JSON.");
+    }
   };
 
   const confirmDeleteIndex = (fieldName: string) => {
@@ -1058,8 +1683,9 @@ export const CollectionsPage = () => {
     {
       title: "Collection",
       dataIndex: "name",
+      width: 320,
       render: (name: string) => (
-        <Space>
+        <Space className="collection-name-cell">
           <Typography.Text strong>{name}</Typography.Text>
           <Tag color="green">active</Tag>
         </Space>
@@ -1099,11 +1725,66 @@ export const CollectionsPage = () => {
     },
   ];
 
+  const indexFailureColumns: ColumnsType<RetryableIndexFailure> = [
+    {
+      title: "Collection",
+      dataIndex: "collectionName",
+      width: 190,
+      ellipsis: true,
+    },
+    {
+      title: "Field",
+      dataIndex: "fieldName",
+      width: 180,
+      ellipsis: true,
+    },
+    {
+      title: "Schema",
+      dataIndex: "fieldSchema",
+      width: 190,
+      render: (schema: unknown) => (
+        <Typography.Text code ellipsis style={{ maxWidth: 170 }}>
+          {summarizeJson(schema)}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: "Status",
+      dataIndex: "statusCode",
+      width: 90,
+      render: (statusCode?: number | null) => <Tag color="red">{statusCode ?? "failed"}</Tag>,
+    },
+    {
+      title: "Error",
+      dataIndex: "message",
+      render: (errorMessage: string) => (
+        <Tooltip title={errorMessage}>
+          <Typography.Text ellipsis style={{ display: "block", maxWidth: 260 }}>
+            {errorMessage}
+          </Typography.Text>
+        </Tooltip>
+      ),
+    },
+    {
+      title: "Actions",
+      width: 130,
+      align: "right",
+      render: (_, failure) => (
+        <Button
+          icon={<Pencil size={15} />}
+          onClick={() => openRetryIndexModal(failure)}
+        >
+          Edit & retry
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <>
       <PageToolbar
         title="Collections"
-        subtitle="Create, inspect, index, and remove local Qdrant collections."
+        subtitle="Create, inspect, tune, back up, and remove local Qdrant collections."
         actions={
           <>
             <Tooltip title="Refresh">
@@ -1137,6 +1818,21 @@ export const CollectionsPage = () => {
         />
       ) : null}
 
+      {indexFailures.length ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={`${indexFailures.length} payload ${indexFailures.length === 1 ? "index needs" : "indexes need"} attention`}
+          description="The collections were created and kept. Review the failed index definitions, edit them if needed, and retry without recreating collection data."
+          action={
+            <Button onClick={() => setIndexFailuresOpen(true)}>
+              Review & retry
+            </Button>
+          }
+          style={{ marginBottom: 16 }}
+        />
+      ) : null}
+
       <div className="surface table-surface">
         <Table
           rowKey="name"
@@ -1144,6 +1840,7 @@ export const CollectionsPage = () => {
           dataSource={collections}
           loading={collectionsQuery.isLoading || collectionsQuery.isFetching}
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          scroll={{ x: 500 }}
         />
       </div>
 
@@ -1173,9 +1870,157 @@ export const CollectionsPage = () => {
             onAddAlias={openAliasModal}
             onAddIndex={openIndexModal}
             onDeleteIndex={confirmDeleteIndex}
+            onEditSettings={openSettingsModal}
           />
         ) : null}
       </Drawer>
+
+      <Modal
+        title="Payload indexes need attention"
+        open={indexFailuresOpen && indexFailures.length > 0}
+        width={1040}
+        footer={
+          <Space>
+            <Button
+              danger
+              onClick={() => {
+                setIndexFailures([]);
+                setIndexFailuresOpen(false);
+              }}
+            >
+              Dismiss all
+            </Button>
+            <Button type="primary" onClick={() => setIndexFailuresOpen(false)}>
+              Close
+            </Button>
+          </Space>
+        }
+        onCancel={() => setIndexFailuresOpen(false)}
+      >
+        <Alert
+          type="info"
+          showIcon
+          message="Collection creation succeeded; only the listed payload indexes failed."
+          description="Expand a row to inspect the upstream response. Retrying creates only the index and does not replace the collection."
+          style={{ marginBottom: 16 }}
+        />
+        <Table
+          rowKey="key"
+          columns={indexFailureColumns}
+          dataSource={indexFailures}
+          pagination={false}
+          scroll={{ x: 980 }}
+          expandable={{
+            expandedRowRender: (failure) => (
+              <JsonView
+                data={{
+                  status_code: failure.statusCode,
+                  field_schema: failure.fieldSchema,
+                  detail: failure.detail,
+                }}
+                minHeight={120}
+              />
+            ),
+          }}
+        />
+      </Modal>
+
+      <Modal
+        title={`Edit and retry${retryFailure ? ` ${retryFailure.fieldName}` : ""}`}
+        open={Boolean(retryFailure)}
+        okText="Retry index"
+        confirmLoading={retryIndexMutation.isPending}
+        onOk={submitRetryIndex}
+        onCancel={() => setRetryFailure(null)}
+      >
+        <Alert
+          type="info"
+          showIcon
+          message={`The collection ${retryFailure?.collectionName ?? ""} already exists.`}
+          description="This action retries only the payload index definition below."
+          style={{ marginBottom: 16 }}
+        />
+        <Form layout="vertical">
+          <Form.Item label="Collection">
+            <Input value={retryFailure?.collectionName ?? ""} disabled />
+          </Form.Item>
+          <Form.Item label="Field" required>
+            <Input value={retryFieldName} onChange={(event) => setRetryFieldName(event.target.value)} />
+          </Form.Item>
+          <Form.Item label="Field schema JSON" required>
+            <Input.TextArea
+              rows={8}
+              value={retrySchemaJson}
+              onChange={(event) => setRetrySchemaJson(event.target.value)}
+              spellCheck={false}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`Edit settings${selectedCollection ? ` for ${selectedCollection}` : ""}`}
+        open={settingsOpen}
+        width={760}
+        okText="Apply settings"
+        confirmLoading={updateCollectionMutation.isPending}
+        onOk={() => settingsForm.submit()}
+        onCancel={() => setSettingsOpen(false)}
+      >
+        <Alert
+          type="info"
+          showIcon
+          message="Some changes can trigger segment optimization or vector reindexing."
+          style={{ marginBottom: 16 }}
+        />
+        <Form
+          form={settingsForm}
+          layout="vertical"
+          onFinish={(values) => updateCollectionMutation.mutate(values)}
+        >
+          <Divider orientation="left">Collection parameters</Divider>
+          <div className="form-grid">
+            <Form.Item label="Replication factor" name="replicationFactor">
+              <InputNumber min={1} precision={0} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item label="Write consistency" name="writeConsistencyFactor">
+              <InputNumber min={1} precision={0} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item label="On-disk payload" name="onDiskPayload" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+          </div>
+
+          <Divider orientation="left">Optimizer</Divider>
+          <div className="form-grid two">
+            <Form.Item label="Indexing threshold (KB)" name="indexingThreshold">
+              <InputNumber min={0} precision={0} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item label="Flush interval (seconds)" name="flushIntervalSec">
+              <InputNumber min={1} precision={0} style={{ width: "100%" }} />
+            </Form.Item>
+          </div>
+
+          <Divider orientation="left">HNSW</Divider>
+          <div className="form-grid two">
+            <Form.Item label="M" name="hnswM">
+              <InputNumber min={0} precision={0} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item label="EF construct" name="hnswEfConstruct">
+              <InputNumber min={4} precision={0} style={{ width: "100%" }} />
+            </Form.Item>
+          </div>
+
+          <Divider orientation="left">Advanced update JSON</Divider>
+          <Form.Item name="advancedJson">
+            <Input.TextArea
+              rows={6}
+              spellCheck={false}
+              placeholder={'{"metadata":{"owner":"local"},"strict_mode_config":{"enabled":true}}'}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title={`Create alias${selectedCollection ? ` for ${selectedCollection}` : ""}`}

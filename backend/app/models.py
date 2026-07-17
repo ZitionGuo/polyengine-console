@@ -22,6 +22,19 @@ class CollectionCreateRequest(BaseModel):
     indexes: list[IndexCreateRequest] = Field(default_factory=list)
 
 
+class CollectionUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    params: dict[str, Any] | None = None
+    vectors: dict[str, Any] | None = None
+    sparse_vectors: dict[str, Any] | None = None
+    hnsw_config: dict[str, Any] | None = None
+    optimizers_config: dict[str, Any] | None = None
+    quantization_config: Any | None = None
+    strict_mode_config: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+
+
 class PointsScrollRequest(BaseModel):
     limit: int = Field(default=20, ge=1, le=100)
     offset: Any | None = None
@@ -56,6 +69,15 @@ class PointsDeleteRequest(BaseModel):
 
 class PointsUpsertRequest(BaseModel):
     points: list[dict[str, Any]] = Field(min_length=1)
+
+
+class PointsPayloadOverwriteRequest(BaseModel):
+    payload: dict[str, Any]
+    points: list[Any] = Field(min_length=1)
+
+
+class PointsPayloadClearRequest(BaseModel):
+    points: list[Any] = Field(min_length=1)
 
 
 class RestProxyRequest(BaseModel):

@@ -4,8 +4,11 @@ A local Qdrant management console with a FastAPI proxy backend and a React + Typ
 
 ## Features
 
-- Collection list, detail drawer, creation, deletion, dense vectors, named vectors, sparse vectors, replica/shard options, on-disk payload, advanced JSON, and payload index creation/deletion.
-- Point management inside collection details: scroll preview, JSON upsert, delete by point id, payload filter browsing, and vector query/search with score display.
+- Collection list, detail drawer, creation, deletion, dense vectors, named vectors, sparse vectors, replica/shard options, on-disk payload, advanced JSON, and payload index creation/deletion. Failed post-create indexes keep the collection intact and can be inspected, edited, and retried from the UI.
+- Live collection tuning for replica/write consistency, payload storage, optimizer, HNSW, metadata, and other advanced Qdrant update fields.
+- Per-collection snapshot list, creation, streaming download, and deletion with size, creation time, and checksum display.
+- Structured optimization activity with queue totals, running task progress, idle segments, and recent completed work.
+- Point management inside collection details: scroll preview with first/previous/next navigation, JSON upsert, delete by point id, payload replacement/clearing without resending vectors, payload filter browsing, and vector query/search with score display.
 - Alias list, create, rename, and delete.
 - Cluster status, telemetry summary, and per-collection shard state with single-node/disabled-cluster messaging.
 - REST console for raw Qdrant calls through the backend proxy, with common request templates, local history, response summaries, and confirmation for mutating methods.
@@ -56,9 +59,12 @@ CORS_ORIGINS='["http://localhost:5173","http://127.0.0.1:5173"]'
 ## API surface
 
 - `GET /api/health`
-- `GET /api/collections`, `GET /api/collections/{name}`, `PUT /api/collections/{name}`, `DELETE /api/collections/{name}`
+- `GET /api/collections`, `GET /api/collections/{name}`, `PUT /api/collections/{name}`, `PATCH /api/collections/{name}`, `DELETE /api/collections/{name}`
+- `GET /api/collections/{name}/snapshots`, `POST /api/collections/{name}/snapshots`, `GET /api/collections/{name}/snapshots/{snapshot}`, `DELETE /api/collections/{name}/snapshots/{snapshot}`
+- `GET /api/collections/{name}/optimizations`
 - `PUT /api/collections/{name}/indexes`, `DELETE /api/collections/{name}/indexes/{field}`
 - `POST /api/collections/{name}/points/scroll`, `POST /api/collections/{name}/points/query`, `PUT /api/collections/{name}/points`, `POST /api/collections/{name}/points/delete`
+- `PUT /api/collections/{name}/points/payload`, `POST /api/collections/{name}/points/payload/clear`
 - `GET /api/aliases`, `POST /api/aliases`, `PATCH /api/aliases/{old_alias}`, `DELETE /api/aliases/{alias}`
 - `GET /api/cluster`, `GET /api/cluster/telemetry`, `GET /api/collections/{name}/cluster`
 - `POST /api/rest`
