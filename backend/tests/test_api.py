@@ -126,16 +126,165 @@ async def test_rest_proxy_rejects_absolute_urls():
 
 
 @pytest.mark.anyio
+async def test_scroll_points_maps_to_collection_scroll_endpoint():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/collections/docs/points/scroll",
+            json={
+                "limit": 10,
+                "offset": 123,
+                "with_payload": True,
+                "with_vector": False,
+                "filter": {"must": [{"key": "source", "match": {"value": "demo"}}]},
+            },
+        )
+
+    assert response.status_code == 200
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/collections/docs/points/scroll",
+            "json": {
+                "limit": 10,
+                "offset": 123,
+                "with_payload": True,
+                "with_vector": False,
+                "filter": {"must": [{"key": "source", "match": {"value": "demo"}}]},
+            },
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_query_points_maps_to_collection_query_endpoint():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/collections/docs/points/query",
+            json={
+                "query": [0.1, 0.2, 0.3, 0.4],
+                "using": "dense",
+                "limit": 3,
+                "with_payload": True,
+                "with_vector": False,
+                "filter": {"must": [{"key": "source", "match": {"value": "demo"}}]},
+            },
+        )
+
+    assert response.status_code == 200
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/collections/docs/points/query",
+            "json": {
+                "query": [0.1, 0.2, 0.3, 0.4],
+                "using": "dense",
+                "limit": 3,
+                "with_payload": True,
+                "with_vector": False,
+                "filter": {"must": [{"key": "source", "match": {"value": "demo"}}]},
+            },
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_retrieve_points_maps_to_collection_points_endpoint():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/collections/docs/points/retrieve",
+            json={"ids": [1, "abc"], "with_payload": True, "with_vector": False},
+        )
+
+    assert response.status_code == 200
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/collections/docs/points",
+            "json": {"ids": [1, "abc"], "with_payload": True, "with_vector": False},
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_delete_points_maps_to_collection_delete_endpoint():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/collections/docs/points/delete?wait=true&ordering=strong",
+            json={"points": [1, "abc"]},
+        )
+
+    assert response.status_code == 200
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/collections/docs/points/delete",
+            "params": {"wait": True, "ordering": "strong"},
+            "json": {"points": [1, "abc"]},
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_upsert_points_maps_to_collection_points_endpoint():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.put(
+            "/api/collections/docs/points?wait=true&ordering=strong",
+            json={
+                "points": [
+                    {
+                        "id": 1,
+                        "vector": [0.1, 0.2, 0.3, 0.4],
+                        "payload": {"source": "test"},
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    assert fake.calls == [
+        {
+            "method": "PUT",
+            "path": "/collections/docs/points",
+            "params": {"wait": True, "ordering": "strong"},
+            "json": {
+                "points": [
+                    {
+                        "id": 1,
+                        "vector": [0.1, 0.2, 0.3, 0.4],
+                        "payload": {"source": "test"},
+                    }
+                ]
+            },
+        }
+    ]
+
+
+@pytest.mark.anyio
 async def test_qdrant_client_passes_through_upstream_errors():
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert request.headers["api-key"] == "secret"
+        assert request.headers["api-key"] == "test-qdrant-key"
         return httpx.Response(
             409,
             json={"status": "error", "result": {"reason": "exists"}},
         )
 
     client = QdrantClient(
-        Settings(qdrant_url="http://qdrant.local", qdrant_api_key="secret"),
+        Settings(qdrant_url="http://qdrant.local", qdrant_api_key="test-qdrant-key"),
         transport=httpx.MockTransport(handler),
     )
 

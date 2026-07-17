@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AliasCreateRequest(BaseModel):
@@ -20,6 +20,42 @@ class IndexCreateRequest(BaseModel):
 class CollectionCreateRequest(BaseModel):
     config: dict[str, Any]
     indexes: list[IndexCreateRequest] = Field(default_factory=list)
+
+
+class PointsScrollRequest(BaseModel):
+    limit: int = Field(default=20, ge=1, le=100)
+    offset: Any | None = None
+    filter: dict[str, Any] | None = None
+    with_payload: Any = True
+    with_vector: Any = False
+
+
+class PointsQueryRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    query: Any
+    using: str | None = None
+    filter: dict[str, Any] | None = None
+    params: dict[str, Any] | None = None
+    limit: int = Field(default=10, ge=1, le=100)
+    offset: Any | None = None
+    with_payload: Any = True
+    with_vector: Any = False
+    score_threshold: float | None = None
+
+
+class PointsRetrieveRequest(BaseModel):
+    ids: list[Any] = Field(min_length=1)
+    with_payload: Any = True
+    with_vector: Any = False
+
+
+class PointsDeleteRequest(BaseModel):
+    points: list[Any] = Field(min_length=1)
+
+
+class PointsUpsertRequest(BaseModel):
+    points: list[dict[str, Any]] = Field(min_length=1)
 
 
 class RestProxyRequest(BaseModel):

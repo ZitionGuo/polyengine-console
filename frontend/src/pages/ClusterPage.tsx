@@ -31,6 +31,22 @@ interface EndpointRow {
   avgDurationMicros: number;
 }
 
+interface ShardRow {
+  key: string;
+  shardId: string;
+  location: string;
+  state: string;
+  points: number | string;
+}
+
+interface TransferRow {
+  key: string;
+  shardId: string;
+  from: string;
+  to: string;
+  status: string;
+}
+
 const asRecord = (value: unknown): AnyRecord =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as AnyRecord) : {};
 
@@ -70,6 +86,70 @@ const flattenEndpointRows = (telemetry: AnyRecord): EndpointRow[] => {
   );
 };
 
+const displayUnknown = (value: unknown) =>
+  value === undefined || value === null || value === "" ? "Unknown" : String(value);
+
+const buildShardRows = (collectionCluster: AnyRecord): ShardRow[] => {
+  const localRows = (Array.isArray(collectionCluster.local_shards) ? collectionCluster.local_shards : []).map(
+    (shard, index) => {
+      const row = asRecord(shard);
+      return {
+        key: `local-${String(row.shard_id ?? index)}`,
+        shardId: displayUnknown(row.shard_id),
+        location: "Local",
+        state: displayUnknown(row.state),
+        points: asNumber(row.points_count),
+      };
+    },
+  );
+
+  const remoteRows = (Array.isArray(collectionCluster.remote_shards) ? collectionCluster.remote_shards : []).map(
+    (shard, index) => {
+      const row = asRecord(shard);
+      return {
+        key: `remote-${String(row.shard_id ?? index)}-${String(row.peer_id ?? "")}`,
+        shardId: displayUnknown(row.shard_id),
+        location: `Peer ${displayUnknown(row.peer_id)}`,
+        state: displayUnknown(row.state),
+        points: displayUnknown(row.points_count),
+      };
+    },
+  );
+
+  return [...localRows, ...remoteRows];
+};
+
+const buildTransferRows = (collectionCluster: AnyRecord): TransferRow[] =>
+  (Array.isArray(collectionCluster.shard_transfers) ? collectionCluster.shard_transfers : []).map((transfer, index) => {
+    const row = asRecord(transfer);
+    return {
+      key: `${displayUnknown(row.shard_id)}-${index}`,
+      shardId: displayUnknown(row.shard_id),
+      from: displayUnknown(row.from),
+      to: displayUnknown(row.to),
+      status: displayUnknown(row.status),
+    };
+  });
+
+const buildCollectionConfigShardRows = (collectionDetails: AnyRecord): ShardRow[] => {
+  const params = asRecord(asRecord(collectionDetails.config).params);
+  const shardCount = Math.max(0, asNumber(params.shard_number));
+  if (!shardCount) return [];
+
+  return Array.from({ length: shardCount }, (_, index) => ({
+    key: `configured-${index}`,
+    shardId: String(index),
+    location: "Collection config",
+    state: "Configured",
+    points: shardCount === 1 ? asNumber(collectionDetails.points_count) : "Unknown",
+  }));
+};
+
+const getCollectionConfigShardCount = (collectionDetails: AnyRecord) => {
+  const params = asRecord(asRecord(collectionDetails.config).params);
+  return params.shard_number;
+};
+
 export const ClusterPage = () => {
   const [collectionName, setCollectionName] = useState<string | undefined>();
 
@@ -94,10 +174,20 @@ export const ClusterPage = () => {
     enabled: Boolean(collectionName),
   });
 
+  const collectionDetailsQuery = useQuery({
+    queryKey: ["collections", collectionName],
+    queryFn: () => api.getCollection(collectionName!),
+    enabled: Boolean(collectionName) && collectionClusterQuery.isError,
+  });
+
   const refreshAll = () => {
     clusterQuery.refetch();
     telemetryQuery.refetch();
-    collectionClusterQuery.refetch();
+    collectionsQuery.refetch();
+    if (collectionName) {
+      collectionClusterQuery.refetch();
+      collectionDetailsQuery.refetch();
+    }
   };
 
   const collectionOptions =
@@ -111,7 +201,36 @@ export const ClusterPage = () => {
   const telemetryApp = asRecord(telemetry.app);
   const telemetryCollections = asRecord(telemetry.collections);
   const telemetryCluster = asRecord(telemetry.cluster);
+  const collectionCluster = unwrapResult(collectionClusterQuery.data);
+  const collectionDetails = unwrapResult(collectionDetailsQuery.data);
+  const shardRows = useMemo(() => buildShardRows(collectionCluster), [collectionCluster]);
+  const transferRows = useMemo(() => buildTransferRows(collectionCluster), [collectionCluster]);
+  const configShardRows = useMemo(() => buildCollectionConfigShardRows(collectionDetails), [collectionDetails]);
+  const displayedShardRows = shardRows.length ? shardRows : collectionClusterQuery.isError ? configShardRows : [];
   const endpointRows = useMemo(() => flattenEndpointRows(telemetry), [telemetry]);
+  const showingConfigFallback = collectionClusterQuery.isError && configShardRows.length > 0;
+  const shardPanelLoading = collectionClusterQuery.isFetching || collectionDetailsQuery.isFetching;
+  const shardCount = collectionCluster.shard_count ?? getCollectionConfigShardCount(collectionDetails);
+  const rawShardData = collectionClusterQuery.data ?? collectionDetailsQuery.data ?? null;
+
+  const shardColumns: ColumnsType<ShardRow> = [
+    { title: "Shard", dataIndex: "shardId", width: 90 },
+    { title: "Location", dataIndex: "location" },
+    {
+      title: "State",
+      dataIndex: "state",
+      width: 120,
+      render: (value: string) => <Tag color={value === "Active" ? "blue" : "default"}>{value}</Tag>,
+    },
+    { title: "Points", dataIndex: "points", width: 100 },
+  ];
+
+  const transferColumns: ColumnsType<TransferRow> = [
+    { title: "Shard", dataIndex: "shardId", width: 90 },
+    { title: "From", dataIndex: "from" },
+    { title: "To", dataIndex: "to" },
+    { title: "Status", dataIndex: "status", width: 120 },
+  ];
 
   const endpointColumns: ColumnsType<EndpointRow> = [
     {
@@ -233,35 +352,92 @@ export const ClusterPage = () => {
               options={collectionOptions}
               value={collectionName}
               onChange={setCollectionName}
+              loading={collectionsQuery.isLoading || collectionsQuery.isFetching}
             />
-            {collectionClusterQuery.isError ? (
+            {collectionsQuery.isError ? (
               <Alert
-                type="info"
+                type="error"
                 showIcon
-                message="Collection cluster details unavailable"
-                description={
-                  collectionClusterQuery.error instanceof Error
-                    ? collectionClusterQuery.error.message
-                    : undefined
+                message="Unable to load collection list"
+                description={collectionsQuery.error instanceof Error ? collectionsQuery.error.message : undefined}
+                action={
+                  <Button size="small" onClick={() => collectionsQuery.refetch()}>
+                    Retry
+                  </Button>
                 }
               />
             ) : null}
-            {collectionClusterQuery.isFetching ? <Spin /> : null}
-            {collectionClusterQuery.data ? (
-              <Collapse
-                size="small"
-                defaultActiveKey={["raw-collection-cluster"]}
-                items={[
-                  {
-                    key: "raw-collection-cluster",
-                    label: "Collection shard response",
-                    children: <JsonView data={collectionClusterQuery.data} minHeight={220} />,
-                  },
-                ]}
+            {collectionClusterQuery.isError ? (
+              <Alert
+                type={showingConfigFallback ? "info" : "warning"}
+                showIcon
+                message={
+                  showingConfigFallback
+                    ? "Shard endpoint unavailable, showing collection config"
+                    : "Unable to load collection shard details"
+                }
+                description={
+                  collectionClusterQuery.error instanceof Error
+                    ? collectionClusterQuery.error.message
+                    : "Check that the Python API is running and Qdrant exposes this collection cluster endpoint."
+                }
+                action={
+                  <Button size="small" onClick={() => collectionClusterQuery.refetch()}>
+                    Retry
+                  </Button>
+                }
               />
-            ) : (
+            ) : null}
+            {shardPanelLoading ? <Spin /> : null}
+            {(collectionClusterQuery.data || showingConfigFallback) && collectionName ? (
+              <>
+                <Descriptions
+                  bordered
+                  size="small"
+                  column={1}
+                  items={[
+                    { key: "peer", label: "Peer ID", children: displayUnknown(collectionCluster.peer_id) },
+                    { key: "count", label: "Shard count", children: displayUnknown(shardCount) },
+                    { key: "transfers", label: "Transfers", children: String(transferRows.length) },
+                  ]}
+                />
+                {displayedShardRows.length ? (
+                  <Table
+                    rowKey="key"
+                    size="small"
+                    columns={shardColumns}
+                    dataSource={displayedShardRows}
+                    pagination={false}
+                  />
+                ) : (
+                  <Empty description="No shard rows reported" />
+                )}
+                {transferRows.length ? (
+                  <>
+                    <Typography.Title level={4}>Shard transfers</Typography.Title>
+                    <Table
+                      rowKey="key"
+                      size="small"
+                      columns={transferColumns}
+                      dataSource={transferRows}
+                      pagination={false}
+                    />
+                  </>
+                ) : null}
+                <Collapse
+                  size="small"
+                  items={[
+                    {
+                      key: "raw-collection-cluster",
+                      label: collectionClusterQuery.data ? "Raw shard response" : "Raw collection response",
+                      children: <JsonView data={rawShardData} minHeight={220} />,
+                    },
+                  ]}
+                />
+              </>
+            ) : !collectionClusterQuery.isError ? (
               <Typography.Text type="secondary">Select a collection to inspect shard state.</Typography.Text>
-            )}
+            ) : null}
           </Space>
         </section>
       </div>

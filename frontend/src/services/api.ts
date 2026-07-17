@@ -23,6 +23,44 @@ export interface RestProxyPayload {
   body?: unknown;
 }
 
+export interface PointsScrollPayload {
+  limit?: number;
+  offset?: unknown;
+  filter?: Record<string, unknown>;
+  with_payload?: boolean | string[] | Record<string, unknown>;
+  with_vector?: boolean | string[];
+}
+
+export interface PointsQueryPayload {
+  query: unknown;
+  using?: string;
+  filter?: Record<string, unknown>;
+  params?: Record<string, unknown>;
+  limit?: number;
+  offset?: unknown;
+  with_payload?: boolean | string[] | Record<string, unknown>;
+  with_vector?: boolean | string[];
+  score_threshold?: number;
+}
+
+export interface PointsRetrievePayload {
+  ids: unknown[];
+  with_payload?: boolean | string[] | Record<string, unknown>;
+  with_vector?: boolean | string[];
+}
+
+export interface PointsDeletePayload {
+  points: unknown[];
+  wait?: boolean;
+  ordering?: "weak" | "medium" | "strong";
+}
+
+export interface PointsUpsertPayload {
+  points: Array<Record<string, unknown>>;
+  wait?: boolean;
+  ordering?: "weak" | "medium" | "strong";
+}
+
 export class ApiError extends Error {
   status: number;
   detail: unknown;
@@ -38,7 +76,16 @@ const extractErrorMessage = (detail: unknown) => {
   if (detail && typeof detail === "object" && "detail" in detail) {
     const nested = (detail as { detail?: unknown }).detail;
     if (nested && typeof nested === "object" && "message" in nested) {
-      return String((nested as { message: unknown }).message);
+      const upstreamStatus = (nested as { upstream_status?: unknown }).upstream_status;
+      const upstreamBody = (nested as { upstream_body?: unknown }).upstream_body;
+      const pieces = [String((nested as { message: unknown }).message)];
+      if (upstreamStatus) {
+        pieces.push(`upstream ${String(upstreamStatus)}`);
+      }
+      if (upstreamBody) {
+        pieces.push(typeof upstreamBody === "string" ? upstreamBody : JSON.stringify(upstreamBody));
+      }
+      return pieces.join(" - ");
     }
     return JSON.stringify(nested);
   }
@@ -46,16 +93,32 @@ const extractErrorMessage = (detail: unknown) => {
 };
 
 const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch (error) {
+    throw new ApiError(0, {
+      detail: {
+        message: error instanceof Error ? error.message : "Network request failed.",
+        upstream_status: null,
+        upstream_body: null,
+      },
+    });
+  }
 
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { detail: { message: text || response.statusText } };
+  }
   if (!response.ok) {
     throw new ApiError(response.status, data);
   }
@@ -96,6 +159,57 @@ export const api = {
     request<QdrantEnvelope>(
       `/api/collections/${encodeURIComponent(collectionName)}/indexes/${encodeURIComponent(fieldName)}`,
       { method: "DELETE" },
+    ),
+
+  scrollPoints: (collectionName: string, payload: PointsScrollPayload) =>
+    request<QdrantEnvelope<Record<string, unknown>>>(
+      `/api/collections/${encodeURIComponent(collectionName)}/points/scroll`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  queryPoints: (collectionName: string, payload: PointsQueryPayload) =>
+    request<QdrantEnvelope<Record<string, unknown>>>(
+      `/api/collections/${encodeURIComponent(collectionName)}/points/query`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  retrievePoints: (collectionName: string, payload: PointsRetrievePayload) =>
+    request<QdrantEnvelope<Record<string, unknown>>>(
+      `/api/collections/${encodeURIComponent(collectionName)}/points/retrieve`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  deletePoints: (collectionName: string, payload: PointsDeletePayload) =>
+    request<QdrantEnvelope>(
+      `/api/collections/${encodeURIComponent(collectionName)}/points/delete?${new URLSearchParams({
+        wait: String(payload.wait ?? true),
+        ...(payload.ordering ? { ordering: payload.ordering } : {}),
+      })}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ points: payload.points }),
+      },
+    ),
+
+  upsertPoints: (collectionName: string, payload: PointsUpsertPayload) =>
+    request<QdrantEnvelope>(
+      `/api/collections/${encodeURIComponent(collectionName)}/points?${new URLSearchParams({
+        wait: String(payload.wait ?? true),
+        ...(payload.ordering ? { ordering: payload.ordering } : {}),
+      })}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ points: payload.points }),
+      },
     ),
 
   listAliases: () =>

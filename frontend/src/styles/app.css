@@ -19,8 +19,8 @@ body {
 }
 
 .app-sider {
-  background: #1c2540 !important;
-  border-right: 1px solid #2a3455;
+  background: #2b3a5c !important;
+  border-right: 1px solid #3b4870;
 }
 
 .brand {
@@ -37,9 +37,9 @@ body {
   width: 42px;
   height: 42px;
   place-items: center;
-  color: #c0ccf3;
-  background: #243050;
-  border: 1px solid #394870;
+  color: #cfd8f6;
+  background: #344468;
+  border: 1px solid #4d5c88;
   border-radius: 8px;
 }
 
@@ -62,13 +62,13 @@ body {
 }
 
 .nav-menu .ant-menu-item {
-  color: #b0b6c3;
+  color: #c0c6d0;
   border-radius: 8px;
 }
 
 .nav-menu .ant-menu-item-selected {
   color: #f2f4ff;
-  background: #2650a0 !important;
+  background: #3a66b8 !important;
 }
 
 .app-header {
@@ -120,20 +120,56 @@ body {
 .json-view {
   width: 100%;
   margin: 0;
-  padding: 14px;
-  overflow: auto;
-  color: #d1d6e6;
-  font-size: 12px;
-  line-height: 1.55;
-  background: #141824;
-  border: 1px solid #2a3148;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #d8dfe9;
   border-radius: 8px;
+}
+
+.json-view-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 8px 10px 8px 12px;
+  background: #f7f9fc;
+  border-bottom: 1px solid #e3e8f0;
+}
+
+.json-view-toolbar .ant-btn {
+  flex: 0 0 auto;
+}
+
+.json-view-code {
+  width: 100%;
+  max-height: 520px;
+  margin: 0;
+  padding: 14px 16px;
+  overflow: auto;
+  color: #263247;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  background:
+    linear-gradient(#fbfcfe, #fbfcfe) padding-box,
+    repeating-linear-gradient(
+      to bottom,
+      rgba(77, 148, 245, 0.04) 0,
+      rgba(77, 148, 245, 0.04) 24px,
+      transparent 24px,
+      transparent 48px
+    );
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.form-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .form-row {
@@ -150,6 +186,34 @@ body {
 .dynamic-list {
   display: grid;
   gap: 10px;
+}
+
+.section-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.section-heading h4.ant-typography {
+  margin: 0;
+}
+
+.truncate-cell {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.table-footer-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 .cluster-grid {
@@ -199,6 +263,35 @@ body {
   text-align: left;
 }
 
+.template-description.ant-typography {
+  margin: 6px 0 0;
+}
+
+.response-summary {
+  display: grid;
+  grid-template-columns: 120px 120px minmax(0, 1fr);
+  gap: 10px;
+  margin-top: -6px;
+  margin-bottom: 2px;
+}
+
+.response-summary > div {
+  display: grid;
+  gap: 4px;
+  min-height: 58px;
+  padding: 10px;
+  background: #f5f6fa;
+  border: 1px solid #dbdee5;
+  border-radius: 8px;
+}
+
+.response-summary .ant-typography {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 920px) {
   .app-sider {
     width: 208px !important;
@@ -208,6 +301,7 @@ body {
   }
 
   .form-grid,
+  .form-grid.two,
   .cluster-grid,
   .status-panel,
   .metrics-grid,
@@ -217,7 +311,8 @@ body {
 
   .form-row,
   .form-row.compact,
-  .console-method-path {
+  .console-method-path,
+  .response-summary {
     grid-template-columns: 1fr;
   }
 

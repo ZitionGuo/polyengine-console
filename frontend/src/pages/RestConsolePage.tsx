@@ -17,7 +17,13 @@ import { useEffect, useMemo, useState } from "react";
 import { JsonView } from "../components/JsonView";
 import { PageToolbar } from "../components/PageToolbar";
 import { api, type RestProxyPayload } from "../services/api";
-import { parseJsonBody, parseJsonObject, requiresConfirmation } from "../services/restConsole";
+import {
+  parseJsonBody,
+  parseJsonObject,
+  requiresConfirmation,
+  restTemplates,
+  summarizeResponse,
+} from "../services/restConsole";
 
 type RestMethod = RestProxyPayload["method"];
 
@@ -49,12 +55,15 @@ export const RestConsolePage = () => {
   const [bodyText, setBodyText] = useState("{\n  \n}");
   const [response, setResponse] = useState<unknown>(null);
   const [history, setHistory] = useState<HistoryItem[]>(loadHistory);
+  const [templateKey, setTemplateKey] = useState<string | undefined>();
 
   useEffect(() => {
     localStorage.setItem(historyKey, JSON.stringify(history.slice(0, 12)));
   }, [history]);
 
   const bodyDisabled = useMemo(() => method === "GET" || method === "HEAD", [method]);
+  const selectedTemplate = restTemplates.find((template) => template.key === templateKey);
+  const responseSummary = useMemo(() => summarizeResponse(response), [response]);
 
   const restMutation = useMutation({
     mutationFn: (payload: RestProxyPayload) => api.restProxy(payload),
@@ -112,10 +121,21 @@ export const RestConsolePage = () => {
   };
 
   const applyHistory = (item: HistoryItem) => {
+    setTemplateKey(undefined);
     setMethod(item.method);
     setPath(item.path);
     setQueryText(item.queryText);
     setBodyText(item.bodyText);
+  };
+
+  const applyTemplate = (key: string | undefined) => {
+    setTemplateKey(key);
+    const template = restTemplates.find((item) => item.key === key);
+    if (!template) return;
+    setMethod(template.method);
+    setPath(template.path);
+    setQueryText(template.queryText);
+    setBodyText(template.bodyText);
   };
 
   return (
@@ -141,6 +161,26 @@ export const RestConsolePage = () => {
             <div className="console-method-path">
               <Select value={method} onChange={setMethod} options={methods.map((value) => ({ value, label: value }))} />
               <Input value={path} onChange={(event) => setPath(event.target.value)} placeholder="/collections" />
+            </div>
+
+            <div>
+              <Typography.Text strong>Request template</Typography.Text>
+              <Select
+                allowClear
+                value={templateKey}
+                placeholder="Choose a common Qdrant request"
+                style={{ width: "100%", marginTop: 6 }}
+                onChange={applyTemplate}
+                options={restTemplates.map((template) => ({
+                  value: template.key,
+                  label: template.label,
+                }))}
+              />
+              {selectedTemplate ? (
+                <Typography.Paragraph type="secondary" className="template-description">
+                  {selectedTemplate.description}
+                </Typography.Paragraph>
+              ) : null}
             </div>
 
             <Alert
@@ -182,6 +222,7 @@ export const RestConsolePage = () => {
                   setPath("/collections");
                   setQueryText("{}");
                   setBodyText("{\n  \n}");
+                  setTemplateKey(undefined);
                   setResponse(null);
                 }}
               >
@@ -190,6 +231,22 @@ export const RestConsolePage = () => {
             </Space>
 
             <Typography.Title level={3}>Response</Typography.Title>
+            {response ? (
+              <div className="response-summary">
+                <div>
+                  <Typography.Text type="secondary">Status</Typography.Text>
+                  <Tag color={responseSummary.status === "ok" ? "green" : "red"}>{responseSummary.status}</Tag>
+                </div>
+                <div>
+                  <Typography.Text type="secondary">Time</Typography.Text>
+                  <Typography.Text strong>{responseSummary.time}</Typography.Text>
+                </div>
+                <div>
+                  <Typography.Text type="secondary">Result</Typography.Text>
+                  <Typography.Text strong>{responseSummary.result}</Typography.Text>
+                </div>
+              </div>
+            ) : null}
             <JsonView data={response ?? { ready: true }} minHeight={300} />
           </Space>
         </section>

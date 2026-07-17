@@ -1,9 +1,17 @@
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
-from ..models import CollectionCreateRequest, IndexCreateRequest
+from ..models import (
+    CollectionCreateRequest,
+    IndexCreateRequest,
+    PointsDeleteRequest,
+    PointsQueryRequest,
+    PointsRetrieveRequest,
+    PointsScrollRequest,
+    PointsUpsertRequest,
+)
 from ..qdrant import QdrantClient, get_qdrant_client
 
 router = APIRouter(prefix="/collections", tags=["collections"])
@@ -88,6 +96,85 @@ async def delete_index(
     return await client.request(
         "DELETE",
         _collection_path(collection_name, f"/index/{quote(field_name, safe='')}"),
+    )
+
+
+@router.post("/{collection_name}/points/scroll")
+async def scroll_points(
+    collection_name: str,
+    payload: PointsScrollRequest,
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "POST",
+        _collection_path(collection_name, "/points/scroll"),
+        json=payload.model_dump(exclude_none=True),
+    )
+
+
+@router.post("/{collection_name}/points/query")
+async def query_points(
+    collection_name: str,
+    payload: PointsQueryRequest,
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "POST",
+        _collection_path(collection_name, "/points/query"),
+        json=payload.model_dump(exclude_none=True),
+    )
+
+
+@router.post("/{collection_name}/points/retrieve")
+async def retrieve_points(
+    collection_name: str,
+    payload: PointsRetrieveRequest,
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "POST",
+        _collection_path(collection_name, "/points"),
+        json=payload.model_dump(exclude_none=True),
+    )
+
+
+@router.put("/{collection_name}/points")
+async def upsert_points(
+    collection_name: str,
+    payload: PointsUpsertRequest,
+    wait: bool | None = Query(default=True),
+    ordering: str | None = Query(default=None, pattern="^(weak|medium|strong)$"),
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "PUT",
+        _collection_path(collection_name, "/points"),
+        params={
+            key: value
+            for key, value in {"wait": wait, "ordering": ordering}.items()
+            if value is not None
+        },
+        json=payload.model_dump(exclude_none=True),
+    )
+
+
+@router.post("/{collection_name}/points/delete")
+async def delete_points(
+    collection_name: str,
+    payload: PointsDeleteRequest,
+    wait: bool | None = Query(default=True),
+    ordering: str | None = Query(default=None, pattern="^(weak|medium|strong)$"),
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "POST",
+        _collection_path(collection_name, "/points/delete"),
+        params={
+            key: value
+            for key, value in {"wait": wait, "ordering": ordering}.items()
+            if value is not None
+        },
+        json=payload.model_dump(exclude_none=True),
     )
 
 

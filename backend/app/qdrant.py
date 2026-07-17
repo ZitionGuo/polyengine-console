@@ -46,6 +46,7 @@ class QdrantClient:
                 base_url=self._base_url,
                 timeout=30,
                 transport=self._transport,
+                trust_env=False,
             ) as client:
                 response = await client.request(
                     method,
