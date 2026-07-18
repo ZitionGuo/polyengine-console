@@ -87,12 +87,16 @@ class QdrantClient:
         *,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
+        files: Any | None = None,
+        timeout: httpx.Timeout | float | None = None,
     ) -> Any:
         response = await self.request_with_metadata(
             method,
             path,
             params=params,
             json=json,
+            files=files,
+            timeout=timeout,
         )
         return response.body
 
@@ -103,15 +107,25 @@ class QdrantClient:
         *,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
+        files: Any | None = None,
+        timeout: httpx.Timeout | float | None = None,
     ) -> QdrantHttpResponse:
         started_at = perf_counter()
+        request_kwargs: dict[str, Any] = {
+            "params": params,
+            "headers": self._headers(),
+        }
+        if files is not None:
+            request_kwargs["files"] = files
+        elif json is not None:
+            request_kwargs["json"] = json
+        if timeout is not None:
+            request_kwargs["timeout"] = timeout
         try:
             response = await self._get_request_client().request(
                 method,
                 normalize_qdrant_path(path),
-                params=params,
-                json=json,
-                headers=self._headers(),
+                **request_kwargs,
             )
         except httpx.RequestError as exc:
             raise HTTPException(

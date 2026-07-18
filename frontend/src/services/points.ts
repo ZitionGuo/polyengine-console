@@ -1,4 +1,10 @@
-import type { PointsQueryPayload, PointsRetrievePayload, PointsScrollPayload } from "./api";
+import type {
+  PointsCountPayload,
+  PointsFacetPayload,
+  PointsQueryPayload,
+  PointsRetrievePayload,
+  PointsScrollPayload,
+} from "./api";
 
 type PointInput = Record<string, unknown>;
 
@@ -20,6 +26,16 @@ export interface PointScrollInput {
 export interface PointRetrieveInput {
   idsText: string;
   withVector?: boolean;
+}
+
+export interface PointCountInput {
+  filterText?: string;
+  exact?: boolean;
+}
+
+export interface PointFacetInput extends PointCountInput {
+  key: string;
+  limit?: number;
 }
 
 export const defaultPointsJson = `[
@@ -114,6 +130,37 @@ export const buildPointScrollPayload = ({
     with_payload: true,
     with_vector: Boolean(withVector),
   }) as PointsScrollPayload;
+};
+
+export const buildPointCountPayload = ({
+  filterText = defaultPointFilterJson,
+  exact = true,
+}: PointCountInput): PointsCountPayload => {
+  const filter = parsePointFilter(filterText);
+  return {
+    ...(Object.keys(filter).length ? { filter } : {}),
+    exact,
+  };
+};
+
+export const buildPointFacetPayload = ({
+  key,
+  limit = 10,
+  filterText = defaultPointFilterJson,
+  exact = false,
+}: PointFacetInput): PointsFacetPayload => {
+  const normalizedKey = key.trim();
+  if (!normalizedKey) throw new Error("Facet field is required.");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error("Facet limit must be an integer between 1 and 100.");
+  }
+  const filter = parsePointFilter(filterText);
+  return {
+    key: normalizedKey,
+    limit,
+    ...(Object.keys(filter).length ? { filter } : {}),
+    exact,
+  };
 };
 
 export const buildPointQueryPayload = ({

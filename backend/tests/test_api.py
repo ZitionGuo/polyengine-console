@@ -170,6 +170,158 @@ async def test_alias_update_requires_at_least_one_change_field():
 
 
 @pytest.mark.anyio
+async def test_collection_overview_aggregates_runtime_metrics_and_encodes_names():
+    class OverviewClient(RecordingQdrantClient):
+        async def request(self, method: str, path: str, **kwargs):
+            self.calls.append({"method": method, "path": path, **kwargs})
+            if path == "/collections":
+                return {
+                    "result": {
+                        "collections": [
+                            {"name": "docs"},
+                            {"name": "docs archive"},
+                        ]
+                    },
+                    "status": "ok",
+                }
+            if path == "/collections/docs":
+                return {
+                    "result": {
+                        "status": "green",
+                        "optimizer_status": "ok",
+                        "points_count": 42,
+                        "vectors_count": 45,
+                        "indexed_vectors_count": 40,
+                        "segments_count": 3,
+                        "config": {
+                            "params": {
+                                "vectors": {"size": 4, "distance": "Cosine"},
+                                "sparse_vectors": {"text": {}},
+                            }
+                        },
+                        "update_queue": {"length": 2},
+                    }
+                }
+            return {
+                "result": {
+                    "status": "yellow",
+                    "optimizer_status": "optimizing",
+                    "points_count": 7,
+                    "indexed_vectors_count": 0,
+                    "segments_count": 1,
+                    "config": {
+                        "params": {
+                            "vectors": {
+                                "title": {"size": 4, "distance": "Cosine"},
+                                "body": {"size": 8, "distance": "Dot"},
+                            }
+                        }
+                    },
+                }
+            }
+
+    fake = OverviewClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/collections?include_details=true")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "result": {
+            "collections": [
+                {
+                    "name": "docs",
+                    "status": "green",
+                    "optimizer_status": "ok",
+                    "points_count": 42,
+                    "vectors_count": 45,
+                    "indexed_vectors_count": 40,
+                    "segments_count": 3,
+                    "dense_vector_count": 1,
+                    "sparse_vector_count": 1,
+                    "update_queue_length": 2,
+                },
+                {
+                    "name": "docs archive",
+                    "status": "yellow",
+                    "optimizer_status": "optimizing",
+                    "points_count": 7,
+                    "vectors_count": None,
+                    "indexed_vectors_count": 0,
+                    "segments_count": 1,
+                    "dense_vector_count": 2,
+                    "sparse_vector_count": 0,
+                    "update_queue_length": None,
+                },
+            ],
+            "errors": [],
+        },
+        "status": "ok",
+    }
+    assert fake.calls == [
+        {"method": "GET", "path": "/collections"},
+        {"method": "GET", "path": "/collections/docs"},
+        {"method": "GET", "path": "/collections/docs%20archive"},
+    ]
+
+
+@pytest.mark.anyio
+async def test_collection_overview_keeps_rows_when_one_detail_fails():
+    class PartiallyFailingOverviewClient(RecordingQdrantClient):
+        async def request(self, method: str, path: str, **kwargs):
+            self.calls.append({"method": method, "path": path, **kwargs})
+            if path == "/collections":
+                return {
+                    "result": {"collections": [{"name": "ready"}, {"name": "offline"}]}
+                }
+            if path == "/collections/offline":
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "message": "Unable to reach Qdrant.",
+                        "upstream_status": None,
+                        "upstream_body": "connection reset",
+                    },
+                )
+            return {
+                "result": {
+                    "status": "green",
+                    "optimizer_status": "ok",
+                    "points_count": 1,
+                    "indexed_vectors_count": 1,
+                    "segments_count": 1,
+                    "config": {"params": {"vectors": {}}},
+                }
+            }
+
+    fake = PartiallyFailingOverviewClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/collections?include_details=true")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["status"] == "partial"
+    assert [item["name"] for item in body["result"]["collections"]] == ["ready", "offline"]
+    assert body["result"]["collections"][1] == {
+        "name": "offline",
+        "status": "unavailable",
+        "error": {
+            "name": "offline",
+            "status_code": 503,
+            "detail": {
+                "message": "Unable to reach Qdrant.",
+                "upstream_status": None,
+                "upstream_body": "connection reset",
+            },
+        },
+    }
+    assert body["result"]["errors"] == [body["result"]["collections"][1]["error"]]
+
+
+@pytest.mark.anyio
 async def test_collection_create_keeps_collection_when_index_fails():
     class PartiallyFailingClient(RecordingQdrantClient):
         async def request(self, method: str, path: str, **kwargs):
@@ -273,6 +425,95 @@ async def test_collection_snapshot_routes_encode_snapshot_name():
 
 
 @pytest.mark.anyio
+async def test_collection_snapshot_upload_streams_multipart_with_recovery_options():
+    class UploadRecordingClient(RecordingQdrantClient):
+        def __init__(self):
+            super().__init__()
+            self.upload: tuple[str, bytes, str] | None = None
+            self.upload_file = None
+            self.upload_timeout: httpx.Timeout | None = None
+
+        async def request(self, method: str, path: str, **kwargs):
+            filename, file_object, content_type = kwargs["files"]["snapshot"]
+            self.upload = (filename, file_object.read(), content_type)
+            self.upload_file = file_object
+            self.upload_timeout = kwargs["timeout"]
+            self.calls.append(
+                {
+                    "method": method,
+                    "path": path,
+                    "params": kwargs["params"],
+                }
+            )
+            return {"result": True, "status": "ok"}
+
+    fake = UploadRecordingClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+    checksum = "A" * 64
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            f"/api/collections/docs%20copy/snapshots/upload?wait=true&priority=snapshot&checksum={checksum}",
+            files={
+                "snapshot": (
+                    "folder/backup.snapshot",
+                    b"snapshot-bytes",
+                    "application/octet-stream",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"result": True, "status": "ok"}
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/collections/docs%20copy/snapshots/upload",
+            "params": {
+                "wait": True,
+                "priority": "snapshot",
+                "checksum": checksum.lower(),
+            },
+        }
+    ]
+    assert fake.upload == ("backup.snapshot", b"snapshot-bytes", "application/octet-stream")
+    assert fake.upload_file.closed is True
+    assert isinstance(fake.upload_timeout, httpx.Timeout)
+    assert fake.upload_timeout.connect == 30
+    assert fake.upload_timeout.read is None
+    assert fake.upload_timeout.write is None
+    assert fake.upload_timeout.pool == 30
+
+
+@pytest.mark.anyio
+async def test_collection_snapshot_upload_validates_extension_checksum_and_priority():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        extension_response = await client.post(
+            "/api/collections/docs/snapshots/upload",
+            files={"snapshot": ("backup.zip", b"not-a-snapshot")},
+        )
+        checksum_response = await client.post(
+            "/api/collections/docs/snapshots/upload?checksum=invalid",
+            files={"snapshot": ("backup.snapshot", b"snapshot")},
+        )
+        priority_response = await client.post(
+            "/api/collections/docs/snapshots/upload?priority=unknown",
+            files={"snapshot": ("backup.snapshot", b"snapshot")},
+        )
+
+    assert extension_response.status_code == 400
+    assert extension_response.json()["detail"]["message"] == (
+        "Snapshot files must use the .snapshot extension."
+    )
+    assert checksum_response.status_code == 422
+    assert priority_response.status_code == 422
+    assert fake.calls == []
+
+
+@pytest.mark.anyio
 async def test_collection_snapshot_download_streams_file_with_safe_filename():
     fake = RecordingQdrantClient()
     transport = httpx.ASGITransport(app=make_test_app(fake))
@@ -299,6 +540,58 @@ async def test_collection_snapshot_download_streams_file_with_safe_filename():
 
 
 @pytest.mark.anyio
+async def test_storage_snapshot_list_create_and_delete_proxy_qdrant_endpoints():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        list_response = await client.get("/api/snapshots")
+        create_response = await client.post("/api/snapshots?wait=true")
+        delete_response = await client.delete(
+            "/api/snapshots/full%20backup%231.snapshot?wait=false"
+        )
+
+    assert list_response.status_code == 200
+    assert create_response.status_code == 200
+    assert delete_response.status_code == 200
+    assert fake.calls[0] == {"method": "GET", "path": "/snapshots"}
+    assert fake.calls[1]["method"] == "POST"
+    assert fake.calls[1]["path"] == "/snapshots"
+    assert fake.calls[1]["params"] == {"wait": True}
+    assert isinstance(fake.calls[1]["timeout"], httpx.Timeout)
+    assert fake.calls[1]["timeout"].read is None
+    assert fake.calls[2] == {
+        "method": "DELETE",
+        "path": "/snapshots/full%20backup%231.snapshot",
+        "params": {"wait": False},
+    }
+
+
+@pytest.mark.anyio
+async def test_storage_snapshot_download_streams_file_with_safe_filename():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/snapshots/full%20backup%232.snapshot")
+
+    assert response.status_code == 200
+    assert response.content == b"snapshot-data"
+    assert response.headers["content-type"] == "application/octet-stream"
+    assert response.headers["content-length"] == "13"
+    assert response.headers["content-disposition"] == (
+        "attachment; filename*=UTF-8''full%20backup%232.snapshot"
+    )
+    assert fake.calls == [
+        {
+            "method": "GET",
+            "path": "/snapshots/full%20backup%232.snapshot",
+            "stream": True,
+        }
+    ]
+
+
+@pytest.mark.anyio
 async def test_collection_optimizations_includes_optional_sections():
     fake = RecordingQdrantClient()
     transport = httpx.ASGITransport(app=make_test_app(fake))
@@ -319,6 +612,70 @@ async def test_collection_optimizations_includes_optional_sections():
             },
         }
     ]
+
+
+@pytest.mark.anyio
+async def test_point_count_and_facet_proxy_filters_with_encoded_collection_name():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+    point_filter = {
+        "must": [{"key": "category", "match": {"value": "news"}}]
+    }
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        count_response = await client.post(
+            "/api/collections/docs%20copy/points/count",
+            json={"filter": point_filter, "exact": True},
+        )
+        facet_response = await client.post(
+            "/api/collections/docs%20copy/points/facet",
+            json={
+                "key": "source.type",
+                "limit": 25,
+                "filter": point_filter,
+                "exact": False,
+            },
+        )
+
+    assert count_response.status_code == 200
+    assert facet_response.status_code == 200
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/collections/docs%20copy/points/count",
+            "json": {"filter": point_filter, "exact": True},
+        },
+        {
+            "method": "POST",
+            "path": "/collections/docs%20copy/facet",
+            "json": {
+                "key": "source.type",
+                "limit": 25,
+                "filter": point_filter,
+                "exact": False,
+            },
+        },
+    ]
+
+
+@pytest.mark.anyio
+async def test_point_facet_validates_key_and_limit_before_proxying():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        empty_key = await client.post(
+            "/api/collections/docs/points/facet",
+            json={"key": "   "},
+        )
+        invalid_limit = await client.post(
+            "/api/collections/docs/points/facet",
+            json={"key": "category", "limit": 101},
+        )
+
+    assert empty_key.status_code == 422
+    assert invalid_limit.status_code == 422
+    assert fake.calls == []
 
 
 @pytest.mark.anyio

@@ -18,6 +18,12 @@ export default defineConfig({
             return "vendor-react";
           }
           if (
+            id.includes("/node_modules/antd/es/upload/") ||
+            id.includes("/node_modules/rc-upload/")
+          ) {
+            return "vendor-upload";
+          }
+          if (
             id.includes("/node_modules/rc-") ||
             id.includes("/node_modules/@rc-component/") ||
             id.includes("/node_modules/@ant-design/cssinjs/") ||

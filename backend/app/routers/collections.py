@@ -1,7 +1,9 @@
-from typing import Any
+import asyncio
+from typing import Any, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query
+import httpx
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ..models import (
@@ -9,6 +11,8 @@ from ..models import (
     CollectionUpdateRequest,
     IndexCreateRequest,
     PointsDeleteRequest,
+    PointsCountRequest,
+    PointsFacetRequest,
     PointsPayloadClearRequest,
     PointsPayloadOverwriteRequest,
     PointsQueryRequest,
@@ -25,9 +29,102 @@ def _collection_path(collection_name: str, suffix: str = "") -> str:
     return f"/collections/{quote(collection_name, safe='')}{suffix}"
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _collection_names(response: Any) -> list[str]:
+    result = _as_dict(_as_dict(response).get("result"))
+    collections = result.get("collections")
+    if not isinstance(collections, list):
+        return []
+    return [
+        name
+        for item in collections
+        if isinstance(item, dict)
+        and isinstance((name := item.get("name")), str)
+        and name
+    ]
+
+
+def _collection_overview(name: str, response: Any) -> dict[str, Any]:
+    result = _as_dict(_as_dict(response).get("result", response))
+    config = _as_dict(result.get("config"))
+    params = _as_dict(config.get("params"))
+    vectors = _as_dict(params.get("vectors"))
+    sparse_vectors = _as_dict(params.get("sparse_vectors"))
+    update_queue = _as_dict(result.get("update_queue"))
+    dense_vector_count = 1 if "size" in vectors else len(vectors)
+
+    return {
+        "name": name,
+        "status": result.get("status"),
+        "optimizer_status": result.get("optimizer_status"),
+        "points_count": result.get("points_count"),
+        "vectors_count": result.get("vectors_count"),
+        "indexed_vectors_count": result.get("indexed_vectors_count"),
+        "segments_count": result.get("segments_count"),
+        "dense_vector_count": dense_vector_count,
+        "sparse_vector_count": len(sparse_vectors),
+        "update_queue_length": update_queue.get("length"),
+    }
+
+
+def _collection_error(name: str, exc: Exception) -> dict[str, Any]:
+    if isinstance(exc, HTTPException):
+        return {
+            "name": name,
+            "status_code": exc.status_code,
+            "detail": exc.detail,
+        }
+    return {
+        "name": name,
+        "status_code": None,
+        "detail": str(exc),
+    }
+
+
+async def _load_collection_overview(
+    name: str,
+    client: QdrantClient,
+    semaphore: asyncio.Semaphore,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    try:
+        async with semaphore:
+            response = await client.request("GET", _collection_path(name))
+        return _collection_overview(name, response), None
+    except Exception as exc:  # noqa: BLE001 - keep the remaining collection rows available
+        error = _collection_error(name, exc)
+        return {
+            "name": name,
+            "status": "unavailable",
+            "error": error,
+        }, error
+
+
 @router.get("")
-async def list_collections(client: QdrantClient = Depends(get_qdrant_client)):
-    return await client.request("GET", "/collections")
+async def list_collections(
+    include_details: bool = Query(default=False),
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    response = await client.request("GET", "/collections")
+    if not include_details:
+        return response
+
+    names = _collection_names(response)
+    semaphore = asyncio.Semaphore(8)
+    overview_results = await asyncio.gather(
+        *(_load_collection_overview(name, client, semaphore) for name in names)
+    )
+    collections = [overview for overview, _ in overview_results]
+    errors = [error for _, error in overview_results if error is not None]
+    return {
+        "result": {
+            "collections": collections,
+            "errors": errors,
+        },
+        "status": "partial" if errors else "ok",
+    }
 
 
 @router.get("/{collection_name}")
@@ -118,6 +215,49 @@ async def create_collection_snapshot(
         _collection_path(collection_name, "/snapshots"),
         params={"wait": wait},
     )
+
+
+@router.post("/{collection_name}/snapshots/upload")
+async def upload_collection_snapshot(
+    collection_name: str,
+    snapshot: UploadFile = File(...),
+    wait: bool = Query(default=True),
+    priority: Literal["snapshot", "replica", "no_sync"] = Query(default="snapshot"),
+    checksum: str | None = Query(default=None, pattern="^[A-Fa-f0-9]{64}$"),
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    filename = (snapshot.filename or "snapshot.snapshot").replace("\\", "/").rsplit("/", 1)[-1]
+    if not filename.lower().endswith(".snapshot"):
+        await snapshot.close()
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Snapshot files must use the .snapshot extension.",
+                "upstream_status": None,
+                "upstream_body": None,
+            },
+        )
+
+    params: dict[str, Any] = {"wait": wait, "priority": priority}
+    if checksum:
+        params["checksum"] = checksum.lower()
+
+    try:
+        return await client.request(
+            "POST",
+            _collection_path(collection_name, "/snapshots/upload"),
+            params=params,
+            files={
+                "snapshot": (
+                    filename,
+                    snapshot.file,
+                    snapshot.content_type or "application/octet-stream",
+                )
+            },
+            timeout=httpx.Timeout(connect=30, read=None, write=None, pool=30),
+        )
+    finally:
+        await snapshot.close()
 
 
 @router.get("/{collection_name}/snapshots/{snapshot_name}")
@@ -234,6 +374,32 @@ async def retrieve_points(
     return await client.request(
         "POST",
         _collection_path(collection_name, "/points"),
+        json=payload.model_dump(exclude_none=True),
+    )
+
+
+@router.post("/{collection_name}/points/count")
+async def count_points(
+    collection_name: str,
+    payload: PointsCountRequest,
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "POST",
+        _collection_path(collection_name, "/points/count"),
+        json=payload.model_dump(exclude_none=True),
+    )
+
+
+@router.post("/{collection_name}/points/facet")
+async def facet_points(
+    collection_name: str,
+    payload: PointsFacetRequest,
+    client: QdrantClient = Depends(get_qdrant_client),
+):
+    return await client.request(
+        "POST",
+        _collection_path(collection_name, "/facet"),
         json=payload.model_dump(exclude_none=True),
     )
 

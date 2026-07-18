@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .qdrant import QdrantClient
-from .routers import aliases, cluster, collections, health, rest
+from .routers import aliases, cluster, collections, health, rest, snapshots
 
 
 def create_app() -> FastAPI:
@@ -36,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(collections.router, prefix="/api")
     app.include_router(aliases.router, prefix="/api")
     app.include_router(cluster.router, prefix="/api")
+    app.include_router(snapshots.router, prefix="/api")
     app.include_router(rest.router, prefix="/api")
     return app
 

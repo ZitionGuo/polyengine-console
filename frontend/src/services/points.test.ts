@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildPointCountPayload,
+  buildPointFacetPayload,
   buildPointQueryPayload,
   buildPointRetrievePayload,
   buildPointScrollPayload,
@@ -89,6 +91,34 @@ describe("points helpers", () => {
       with_payload: true,
       with_vector: true,
     });
+  });
+
+  it("builds count and facet payloads from the active filter", () => {
+    const filterText = '{"must":[{"key":"group","match":{"value":"a"}}]}';
+    expect(buildPointCountPayload({ filterText })).toEqual({
+      filter: { must: [{ key: "group", match: { value: "a" } }] },
+      exact: true,
+    });
+    expect(
+      buildPointFacetPayload({
+        key: " source.type ",
+        limit: 25,
+        filterText,
+        exact: true,
+      }),
+    ).toEqual({
+      key: "source.type",
+      limit: 25,
+      filter: { must: [{ key: "group", match: { value: "a" } }] },
+      exact: true,
+    });
+    expect(buildPointCountPayload({})).toEqual({ exact: true });
+  });
+
+  it("rejects invalid facet input", () => {
+    expect(() => buildPointFacetPayload({ key: "   " })).toThrow(/required/);
+    expect(() => buildPointFacetPayload({ key: "group", limit: 0 })).toThrow(/between 1 and 100/);
+    expect(() => buildPointFacetPayload({ key: "group", limit: 1.5 })).toThrow(/integer/);
   });
 
   it("rejects invalid point query input", () => {

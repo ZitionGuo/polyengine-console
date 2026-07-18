@@ -15,12 +15,14 @@ import {
   Braces,
   Cable,
   GitBranch,
+  HardDrive,
   Network,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 
 import { api } from "./services/api";
 import {
+  getCollectionNameFromPath,
   getPageDocumentTitle,
   getPageFromPath,
   getPagePath,
@@ -58,6 +60,11 @@ const navigation = [
   { key: "rest", icon: <Braces size={18} />, label: "REST Console" },
 ];
 
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
 const PageLoading = () => (
   <div className="surface page-loading" role="status" aria-live="polite">
     <Spin size="large" />
@@ -85,12 +92,17 @@ const Shell = () => {
   })();
   const healthError = healthQuery.error instanceof Error ? healthQuery.error.message : "Qdrant is unreachable.";
   const healthState = healthQuery.isFetching ? "checking" : healthQuery.isError ? "error" : "ok";
+  const activeNavigation = navigation.find((item) => item.key === page);
+  const qdrantVersion = asRecord(healthQuery.data?.qdrant).version;
 
   useEffect(() => {
     const syncPageFromLocation = () => {
       const nextPage = getPageFromPath(window.location.pathname) ?? "collections";
       const canonicalPath = getPagePath(nextPage);
-      if (window.location.pathname !== canonicalPath) {
+      const isCollectionDetailPath = Boolean(
+        getCollectionNameFromPath(window.location.pathname),
+      );
+      if (window.location.pathname !== canonicalPath && !isCollectionDetailPath) {
         window.history.replaceState(window.history.state, "", canonicalPath);
       }
       setPage(nextPage);
@@ -109,6 +121,7 @@ const Shell = () => {
     const nextPath = getPagePath(nextPage);
     if (window.location.pathname !== nextPath) {
       window.history.pushState({ page: nextPage }, "", nextPath);
+      window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
     }
     setPage(nextPage);
   };
@@ -132,9 +145,22 @@ const Shell = () => {
           onClick={(item) => navigateTo(item.key as PageKey)}
           className="nav-menu"
         />
+        <div className="sider-footer">
+          <div className="sider-footer-icon">
+            <HardDrive size={16} />
+          </div>
+          <div>
+            <Typography.Text>Local instance</Typography.Text>
+            <Typography.Text>{qdrantVersion ? `Qdrant ${String(qdrantVersion)}` : "Qdrant"}</Typography.Text>
+          </div>
+        </div>
       </Layout.Sider>
       <Layout>
         <Layout.Header className="app-header">
+          <div className="header-context">
+            <Typography.Text>Local workspace</Typography.Text>
+            <Typography.Text strong>{activeNavigation?.label}</Typography.Text>
+          </div>
           <Tooltip
             title={
               healthState === "error"
@@ -144,7 +170,7 @@ const Shell = () => {
                   : "Backend and Qdrant API are reachable."
             }
           >
-            <Space>
+            <Space className={`health-pill health-pill-${healthState}`}>
               <Badge
                 status={healthState === "error" ? "error" : healthState === "checking" ? "processing" : "success"}
               />
@@ -166,14 +192,23 @@ export const RootApp = () => (
   <ConfigProvider
     theme={{
       token: {
-        colorPrimary: "#4d94f5",
-        borderRadius: 8,
+        colorPrimary: "#e25555",
+        colorInfo: "#477f9d",
+        colorSuccess: "#23866b",
+        colorWarning: "#c9852b",
+        colorText: "#20252b",
+        colorTextSecondary: "#697078",
+        colorBorder: "#dfe2e6",
+        colorBgLayout: "#f2f3f5",
+        borderRadius: 6,
         fontFamily:
           "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
       },
       components: {
-        Button: { controlHeight: 36 },
-        Table: { headerBg: "#f5f6f8" },
+        Button: { controlHeight: 36, fontWeight: 550, primaryShadow: "none" },
+        Input: { activeShadow: "0 0 0 2px rgba(226, 85, 85, 0.12)" },
+        Menu: { itemBorderRadius: 5, itemHeight: 42 },
+        Table: { headerBg: "#f6f7f8", headerColor: "#545b63", rowHoverBg: "#fafbfc" },
       },
     }}
   >

@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
+  App as AntApp,
   Button,
   Collapse,
   Descriptions,
@@ -11,19 +12,21 @@ import {
   Statistic,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { RefreshCw } from "lucide-react";
+import { Camera, Download, RefreshCw, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { JsonView } from "../components/JsonView";
 import { PageToolbar } from "../components/PageToolbar";
-import { api } from "../services/api";
+import { api, type CollectionSnapshot } from "../services/api";
 import {
   getClusterMode,
   shouldRequestCollectionCluster,
   shouldRequestCollectionDetails,
+  type ClusterMode,
 } from "../services/cluster";
 
 type AnyRecord = Record<string, unknown>;
@@ -73,6 +76,19 @@ const formatDate = (value: unknown) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+};
+
+const formatBytes = (size: number) => {
+  if (!Number.isFinite(size) || size < 0) return "Unknown";
+  if (size < 1024) return `${size} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = size / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 };
 
 const flattenEndpointRows = (telemetry: AnyRecord): EndpointRow[] => {
@@ -155,7 +171,195 @@ const getCollectionConfigShardCount = (collectionDetails: AnyRecord) => {
   return params.shard_number;
 };
 
+const StorageSnapshots = ({ clusterMode }: { clusterMode: ClusterMode }) => {
+  const { message, modal } = AntApp.useApp();
+  const queryClient = useQueryClient();
+  const snapshotsQuery = useQuery({
+    queryKey: ["snapshots", "storage"],
+    queryFn: api.listStorageSnapshots,
+  });
+  const createSnapshotMutation = useMutation({
+    mutationFn: api.createStorageSnapshot,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["snapshots", "storage"] });
+      message.success("Full storage snapshot created.");
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : "Failed to create storage snapshot.");
+    },
+  });
+  const deleteSnapshotMutation = useMutation({
+    mutationFn: api.deleteStorageSnapshot,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["snapshots", "storage"] });
+      message.success("Storage snapshot deleted.");
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : "Failed to delete storage snapshot.");
+    },
+  });
+  const snapshots = snapshotsQuery.data?.result ?? [];
+  const createDisabledReason =
+    clusterMode === "enabled"
+      ? "Full storage snapshots are not supported for distributed Qdrant deployments."
+      : clusterMode === "unknown"
+        ? "Wait for Qdrant cluster mode detection before creating a full snapshot."
+        : undefined;
+
+  const columns: ColumnsType<CollectionSnapshot> = [
+    {
+      title: "Snapshot",
+      dataIndex: "name",
+      ellipsis: true,
+      render: (name: string) => (
+        <Tooltip title={name}>
+          <Typography.Text strong className="truncate-cell">
+            {name}
+          </Typography.Text>
+        </Tooltip>
+      ),
+    },
+    {
+      title: "Created",
+      dataIndex: "creation_time",
+      width: 190,
+      render: formatDate,
+    },
+    {
+      title: "Size",
+      dataIndex: "size",
+      width: 105,
+      align: "right",
+      render: formatBytes,
+    },
+    {
+      title: "Checksum",
+      dataIndex: "checksum",
+      width: 240,
+      ellipsis: true,
+      render: (checksum?: string) =>
+        checksum ? (
+          <Typography.Text code copyable={{ text: checksum }}>
+            {checksum}
+          </Typography.Text>
+        ) : (
+          <Typography.Text type="secondary">Not reported</Typography.Text>
+        ),
+    },
+    {
+      title: "Actions",
+      width: 105,
+      align: "right",
+      render: (_, snapshot) => (
+        <Space>
+          <Tooltip title="Download snapshot">
+            <Button
+              aria-label={`Download ${snapshot.name}`}
+              icon={<Download size={16} />}
+              href={api.storageSnapshotDownloadUrl(snapshot.name)}
+            />
+          </Tooltip>
+          <Tooltip title="Delete snapshot">
+            <Button
+              danger
+              aria-label={`Delete ${snapshot.name}`}
+              icon={<Trash2 size={16} />}
+              loading={
+                deleteSnapshotMutation.isPending &&
+                deleteSnapshotMutation.variables === snapshot.name
+              }
+              onClick={() =>
+                modal.confirm({
+                  title: `Delete ${snapshot.name}?`,
+                  content: "This removes the full storage backup file from Qdrant.",
+                  okText: "Delete",
+                  okButtonProps: { danger: true },
+                  onOk: () => deleteSnapshotMutation.mutateAsync(snapshot.name),
+                })
+              }
+            />
+          </Tooltip>
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <section className="surface storage-snapshots-surface">
+      <div className="section-heading">
+        <div>
+          <Typography.Title level={3}>Storage snapshots</Typography.Title>
+          <Typography.Text type="secondary">
+            Back up every collection and alias in this Qdrant instance.
+          </Typography.Text>
+        </div>
+        <Space wrap>
+          <Tooltip title="Refresh storage snapshots">
+            <Button
+              icon={<RefreshCw size={16} />}
+              loading={snapshotsQuery.isFetching}
+              onClick={() => snapshotsQuery.refetch()}
+            />
+          </Tooltip>
+          <Tooltip title={createDisabledReason}>
+            <span>
+              <Button
+                type="primary"
+                icon={<Camera size={16} />}
+                disabled={Boolean(createDisabledReason)}
+                loading={createSnapshotMutation.isPending}
+                onClick={() => createSnapshotMutation.mutate()}
+              >
+                Create full snapshot
+              </Button>
+            </span>
+          </Tooltip>
+        </Space>
+      </div>
+
+      <Alert
+        type={clusterMode === "enabled" ? "warning" : "info"}
+        showIcon
+        message={
+          clusterMode === "enabled"
+            ? "Full storage snapshots are only suitable for single-node deployments."
+            : "Restore requires restarting Qdrant with the --storage-snapshot option."
+        }
+        description="The web console can create, download, and delete these backups, but cannot restore an entire running instance."
+        style={{ marginBottom: 12 }}
+      />
+
+      {snapshotsQuery.isError ? (
+        <Alert
+          type="error"
+          showIcon
+          message="Unable to load storage snapshots"
+          description={snapshotsQuery.error instanceof Error ? snapshotsQuery.error.message : undefined}
+          action={<Button onClick={() => snapshotsQuery.refetch()}>Retry</Button>}
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
+
+      <Table
+        rowKey="name"
+        size="small"
+        columns={columns}
+        dataSource={snapshots}
+        loading={snapshotsQuery.isLoading}
+        pagination={{ pageSize: 8, hideOnSinglePage: true }}
+        scroll={{ x: 860 }}
+        locale={{
+          emptyText: snapshotsQuery.isError
+            ? "Storage snapshots unavailable"
+            : "No full storage snapshots yet",
+        }}
+      />
+    </section>
+  );
+};
+
 export const ClusterPage = () => {
+  const queryClient = useQueryClient();
   const [collectionName, setCollectionName] = useState<string | undefined>();
 
   const clusterQuery = useQuery({
@@ -201,6 +405,7 @@ export const ClusterPage = () => {
     clusterQuery.refetch();
     telemetryQuery.refetch();
     collectionsQuery.refetch();
+    queryClient.invalidateQueries({ queryKey: ["snapshots", "storage"] });
     if (collectionName) {
       if (clusterMode === "enabled") {
         collectionClusterQuery.refetch();
@@ -291,7 +496,7 @@ export const ClusterPage = () => {
     <>
       <PageToolbar
         title="Cluster"
-        subtitle="Inspect Qdrant cluster state, telemetry, and collection shard placement."
+        subtitle="Inspect cluster state, storage backups, telemetry, and collection shard placement."
         actions={
           <Button
             icon={<RefreshCw size={16} />}
@@ -318,7 +523,7 @@ export const ClusterPage = () => {
       ) : null}
 
       <div className="cluster-grid">
-        <section className="surface" style={{ padding: 16 }}>
+        <section className="surface cluster-panel">
           <Space direction="vertical" size={12} style={{ width: "100%" }}>
             <Typography.Title level={3}>Cluster status</Typography.Title>
             {clusterQuery.isLoading ? (
@@ -369,7 +574,7 @@ export const ClusterPage = () => {
           </Space>
         </section>
 
-        <section className="surface" style={{ padding: 16 }}>
+        <section className="surface cluster-panel">
           <Space direction="vertical" size={12} style={{ width: "100%" }}>
             <Typography.Title level={3}>Collection shards</Typography.Title>
             <Select
@@ -508,7 +713,9 @@ export const ClusterPage = () => {
         </section>
       </div>
 
-      <section className="surface" style={{ padding: 16, marginTop: 16 }}>
+      <StorageSnapshots clusterMode={clusterMode} />
+
+      <section className="surface telemetry-panel">
         <Space direction="vertical" size={12} style={{ width: "100%" }}>
           <Typography.Title level={3}>Telemetry</Typography.Title>
           {telemetryQuery.isError ? (

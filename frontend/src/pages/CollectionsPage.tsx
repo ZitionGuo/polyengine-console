@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   App as AntApp,
+  AutoComplete,
   Button,
   Collapse,
   Descriptions,
@@ -23,14 +24,19 @@ import {
   Tag,
   Tooltip,
   Typography,
+  Upload,
+  type UploadFile,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
+  BarChart3,
   Camera,
+  CircleCheckBig,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   Download,
+  Gauge,
   Eye,
   Filter,
   Plus,
@@ -38,19 +44,22 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Waypoints,
   Trash2,
+  Upload as UploadIcon,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { JsonView } from "../components/JsonView";
 import { PageToolbar } from "../components/PageToolbar";
 import {
   api,
   type AliasSummary,
+  type CollectionOverview,
   type CollectionSnapshot,
-  type CollectionSummary,
   type OptimizationItem,
+  type SnapshotRestoreOptions,
 } from "../services/api";
 import {
   buildCollectionCreatePayload,
@@ -69,9 +78,18 @@ import {
   type CollectionUpdateFormValues,
 } from "../services/collectionUpdate";
 import {
+  describeCollectionOverviewError,
+  filterCollectionOverview,
+  formatCollectionMetric,
+  getCollectionHealth,
+  type CollectionHealthFilter,
+} from "../services/collectionOverview";
+import {
   buildPointRetrievePayload,
   buildPointScrollPayload,
   buildPointQueryPayload,
+  buildPointCountPayload,
+  buildPointFacetPayload,
   defaultPointFilterJson,
   defaultPointIdsJson,
   defaultPointQueryJson,
@@ -81,6 +99,15 @@ import {
   parsePointPayloadInput,
   parseUpsertPointsInput,
 } from "../services/points";
+import {
+  buildSnapshotRestoreOptions,
+  type SnapshotRestoreValues,
+} from "../services/snapshotRestore";
+import {
+  getCollectionNameFromPath,
+  getCollectionPath,
+  getPageDocumentTitle,
+} from "../services/navigation";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -106,6 +133,12 @@ interface PointRow {
   payload: string;
   vector: string;
   raw: unknown;
+}
+
+interface FacetRow {
+  key: string;
+  value: unknown;
+  count: number;
 }
 
 interface VectorOption {
@@ -400,7 +433,11 @@ const CollectionDetails = ({
 
       <CollectionSnapshots collectionName={collectionName} />
 
-      <CollectionPointsPreview collectionName={collectionName} vectorOptions={denseVectorOptions} />
+      <CollectionPointsPreview
+        collectionName={collectionName}
+        vectorOptions={denseVectorOptions}
+        payloadFields={payloadRows.map((row) => row.field)}
+      />
 
       <Collapse
         size="small"
@@ -623,6 +660,9 @@ const formatBytes = (size: number) => {
 const CollectionSnapshots = ({ collectionName }: { collectionName: string }) => {
   const { message, modal } = AntApp.useApp();
   const queryClient = useQueryClient();
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [restoreFiles, setRestoreFiles] = useState<UploadFile[]>([]);
+  const [restoreForm] = Form.useForm<SnapshotRestoreValues>();
   const snapshotsQuery = useQuery({
     queryKey: ["collections", collectionName, "snapshots"],
     queryFn: () => api.listCollectionSnapshots(collectionName),
@@ -648,7 +688,57 @@ const CollectionSnapshots = ({ collectionName }: { collectionName: string }) => 
       message.error(error instanceof Error ? error.message : "Failed to delete snapshot.");
     },
   });
+  const restoreSnapshotMutation = useMutation({
+    mutationFn: ({
+      snapshot,
+      options,
+    }: {
+      snapshot: File;
+      options: SnapshotRestoreOptions;
+    }) => api.uploadCollectionSnapshot(collectionName, snapshot, options),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["collections", "overview"] });
+      queryClient.invalidateQueries({ queryKey: ["collections", collectionName] });
+      setRestoreOpen(false);
+      setRestoreFiles([]);
+      restoreForm.resetFields();
+      message.success("Snapshot restored.");
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : "Failed to restore snapshot.");
+    },
+  });
   const snapshots = snapshotsQuery.data?.result ?? [];
+  const openRestore = () => {
+    setRestoreFiles([]);
+    restoreForm.setFieldsValue({
+      priority: "snapshot",
+      checksum: "",
+      confirmation: "",
+    });
+    setRestoreOpen(true);
+  };
+  const closeRestore = () => {
+    if (restoreSnapshotMutation.isPending) return;
+    setRestoreOpen(false);
+    setRestoreFiles([]);
+    restoreForm.resetFields();
+  };
+  const submitRestore = (values: SnapshotRestoreValues) => {
+    const snapshot = restoreFiles[0]?.originFileObj;
+    if (!snapshot) {
+      message.error("Choose a snapshot file to restore.");
+      return;
+    }
+    try {
+      restoreSnapshotMutation.mutate({
+        snapshot,
+        options: buildSnapshotRestoreOptions(collectionName, values),
+      });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Invalid restore options.");
+    }
+  };
   const columns: ColumnsType<CollectionSnapshot> = [
     {
       title: "Snapshot",
@@ -718,57 +808,159 @@ const CollectionSnapshots = ({ collectionName }: { collectionName: string }) => 
   ];
 
   return (
-    <section>
-      <div className="section-heading">
-        <Typography.Title level={4}>Snapshots</Typography.Title>
-        <Space>
-          <Tooltip title="Refresh snapshots">
+    <>
+      <section>
+        <div className="section-heading">
+          <Typography.Title level={4}>Snapshots</Typography.Title>
+          <Space wrap>
+            <Tooltip title="Refresh snapshots">
+              <Button
+                icon={<RefreshCw size={16} />}
+                loading={snapshotsQuery.isFetching}
+                onClick={() => snapshotsQuery.refetch()}
+              />
+            </Tooltip>
+            <Button icon={<UploadIcon size={16} />} onClick={openRestore}>
+              Restore
+            </Button>
             <Button
-              icon={<RefreshCw size={16} />}
-              loading={snapshotsQuery.isFetching}
-              onClick={() => snapshotsQuery.refetch()}
-            />
-          </Tooltip>
-          <Button
-            icon={<Camera size={16} />}
-            loading={createSnapshotMutation.isPending}
-            onClick={() => createSnapshotMutation.mutate()}
-          >
-            Create snapshot
-          </Button>
-        </Space>
-      </div>
-      {snapshotsQuery.isError ? (
-        <Alert
-          type="warning"
-          showIcon
-          message="Unable to load snapshots"
-          description={
-            snapshotsQuery.error instanceof Error ? snapshotsQuery.error.message : undefined
-          }
-          style={{ marginBottom: 12 }}
+              icon={<Camera size={16} />}
+              loading={createSnapshotMutation.isPending}
+              onClick={() => createSnapshotMutation.mutate()}
+            >
+              Create snapshot
+            </Button>
+          </Space>
+        </div>
+        {snapshotsQuery.isError ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="Unable to load snapshots"
+            description={
+              snapshotsQuery.error instanceof Error ? snapshotsQuery.error.message : undefined
+            }
+            style={{ marginBottom: 12 }}
+          />
+        ) : null}
+        <Table
+          rowKey="name"
+          size="small"
+          columns={columns}
+          dataSource={snapshots}
+          loading={snapshotsQuery.isLoading}
+          pagination={false}
+          scroll={{ x: 620 }}
+          locale={{ emptyText: snapshotsQuery.isError ? "Snapshots unavailable" : "No snapshots yet" }}
         />
-      ) : null}
-      <Table
-        rowKey="name"
-        size="small"
-        columns={columns}
-        dataSource={snapshots}
-        loading={snapshotsQuery.isLoading}
-        pagination={false}
-        scroll={{ x: 620 }}
-        locale={{ emptyText: snapshotsQuery.isError ? "Snapshots unavailable" : "No snapshots yet" }}
-      />
-    </section>
+      </section>
+
+      <Modal
+        className="snapshot-restore-modal"
+        title={`Restore snapshot into ${collectionName}`}
+        open={restoreOpen}
+        width={620}
+        okText="Restore snapshot"
+        okButtonProps={{ danger: true, disabled: !restoreFiles.length }}
+        confirmLoading={restoreSnapshotMutation.isPending}
+        closable={!restoreSnapshotMutation.isPending}
+        maskClosable={false}
+        onOk={() => restoreForm.submit()}
+        onCancel={closeRestore}
+      >
+        <Alert
+          type="error"
+          showIcon
+          message="Restoring can overwrite collection data and configuration."
+          description="Aliases are not included in collection snapshots and will not be restored."
+          style={{ marginBottom: 16 }}
+        />
+        <Form form={restoreForm} layout="vertical" onFinish={submitRestore}>
+          <Form.Item label="Snapshot file" required>
+            <Upload.Dragger
+              accept=".snapshot"
+              maxCount={1}
+              fileList={restoreFiles}
+              beforeUpload={(file) => {
+                if (!file.name.toLowerCase().endsWith(".snapshot")) {
+                  message.error("Snapshot files must use the .snapshot extension.");
+                  return Upload.LIST_IGNORE;
+                }
+                setRestoreFiles([
+                  {
+                    uid: file.uid,
+                    name: file.name,
+                    status: "done",
+                    size: file.size,
+                    type: file.type,
+                    originFileObj: file,
+                  },
+                ]);
+                return false;
+              }}
+              onRemove={() => {
+                setRestoreFiles([]);
+                return true;
+              }}
+            >
+              <div className="snapshot-upload-prompt">
+                <UploadIcon size={24} />
+                <Typography.Text strong>Snapshot file</Typography.Text>
+                <Typography.Text type="secondary">.snapshot</Typography.Text>
+              </div>
+            </Upload.Dragger>
+          </Form.Item>
+          <Form.Item label="Recovery priority" name="priority" required>
+            <Select
+              options={[
+                { value: "snapshot", label: "Snapshot - prefer uploaded data" },
+                { value: "replica", label: "Replica - prefer existing data" },
+                { value: "no_sync", label: "No sync - advanced" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            label="SHA-256 checksum"
+            name="checksum"
+            rules={[
+              {
+                pattern: /^[A-Fa-f0-9]{64}$/,
+                message: "Checksum must be a 64-character SHA-256 value.",
+              },
+            ]}
+          >
+            <Input allowClear placeholder="Optional" spellCheck={false} />
+          </Form.Item>
+          <Form.Item
+            label={`Type ${collectionName} to confirm`}
+            name="confirmation"
+            validateTrigger="onBlur"
+            rules={[
+              { required: true, message: "Collection name confirmation is required." },
+              {
+                validator: (_, value) =>
+                  value === collectionName
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(`Type ${collectionName} exactly.`)),
+              },
+            ]}
+          >
+            <Input autoComplete="off" spellCheck={false} />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
   );
 };
 
 const CollectionPointsPreview = ({
   collectionName,
   vectorOptions,
+  payloadFields,
 }: {
   collectionName: string;
   vectorOptions: VectorOption[];
+  payloadFields: string[];
 }) => {
   const { message, modal } = AntApp.useApp();
   const queryClient = useQueryClient();
@@ -789,6 +981,10 @@ const CollectionPointsPreview = ({
   const [searchLimit, setSearchLimit] = useState(10);
   const [searchUsing, setSearchUsing] = useState<string | undefined>(undefined);
   const [searchWithVector, setSearchWithVector] = useState(false);
+  const [facetOpen, setFacetOpen] = useState(false);
+  const [facetKey, setFacetKey] = useState("");
+  const [facetLimit, setFacetLimit] = useState(10);
+  const [facetExact, setFacetExact] = useState(false);
   const [payloadPoint, setPayloadPoint] = useState<PointRow | null>(null);
   const [payloadJson, setPayloadJson] = useState("{}");
   const filterActive = hasPointFilter(activeFilterJson);
@@ -808,6 +1004,21 @@ const CollectionPointsPreview = ({
         offset,
         filterText: activeFilterJson,
       })),
+    enabled: Boolean(collectionName),
+  });
+  const countQuery = useQuery({
+    queryKey: [
+      "collections",
+      collectionName,
+      "points",
+      "count",
+      activeFilterJson,
+    ],
+    queryFn: () =>
+      api.countPoints(
+        collectionName,
+        buildPointCountPayload({ filterText: activeFilterJson, exact: true }),
+      ),
     enabled: Boolean(collectionName),
   });
   const result = unwrapResult(pointsQuery.data);
@@ -872,6 +1083,22 @@ const CollectionPointsPreview = ({
       ),
     onError: (error) => {
       message.error(error instanceof Error ? error.message : "Failed to query points.");
+    },
+  });
+
+  const facetPointsMutation = useMutation({
+    mutationFn: () =>
+      api.facetPoints(
+        collectionName,
+        buildPointFacetPayload({
+          key: facetKey,
+          limit: facetLimit,
+          filterText: activeFilterJson,
+          exact: facetExact,
+        }),
+      ),
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : "Failed to load payload facets.");
     },
   });
 
@@ -946,6 +1173,7 @@ const CollectionPointsPreview = ({
       setFilterDraftJson(normalized);
       resetPagination();
       setFilterOpen(false);
+      facetPointsMutation.reset();
     } catch (error) {
       message.error(error instanceof Error ? error.message : "Invalid filter JSON.");
     }
@@ -955,6 +1183,15 @@ const CollectionPointsPreview = ({
     setActiveFilterJson(defaultPointFilterJson);
     setFilterDraftJson(defaultPointFilterJson);
     resetPagination();
+    facetPointsMutation.reset();
+  };
+
+  const openFacetExplorer = () => {
+    setFacetKey(payloadFields[0] ?? "");
+    setFacetLimit(10);
+    setFacetExact(false);
+    facetPointsMutation.reset();
+    setFacetOpen(true);
   };
 
   const goToPreviousPage = () => {
@@ -1055,11 +1292,64 @@ const CollectionPointsPreview = ({
   const retrieveRows = buildPointRows(
     Array.isArray(retrieveResult) ? retrieveResult : asRecord(retrieveResult).points,
   );
+  const countResult = unwrapResult(countQuery.data);
+  const pointCount = typeof countResult.count === "number" ? countResult.count : null;
+  const facetResult = unwrapResult(facetPointsMutation.data);
+  const facetRows: FacetRow[] = (
+    Array.isArray(facetResult.hits) ? facetResult.hits : []
+  ).map((hit, index) => {
+    const item = asRecord(hit);
+    return {
+      key: `${index}-${summarizeJson(item.value, "null")}`,
+      value: item.value,
+      count: asNumber(item.count),
+    };
+  });
+  const facetColumns: ColumnsType<FacetRow> = [
+    {
+      title: "Value",
+      dataIndex: "value",
+      render: (value: unknown) => (
+        <Typography.Text code className="truncate-cell" title={summarizeJson(value, "null")}>
+          {summarizeJson(value, "null")}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: "Points",
+      dataIndex: "count",
+      width: 120,
+      align: "right",
+      sorter: (left, right) => left.count - right.count,
+      render: (count: number) => count.toLocaleString(),
+    },
+  ];
 
   return (
     <section>
       <div className="section-heading">
-        <Typography.Title level={4}>Points preview</Typography.Title>
+        <Space wrap>
+          <Typography.Title level={4}>Points preview</Typography.Title>
+          <Tooltip
+            title={
+              countQuery.isError
+                ? countQuery.error instanceof Error
+                  ? countQuery.error.message
+                  : "Unable to count matching points."
+                : filterActive
+                  ? "Exact count for the active filter."
+                  : "Exact collection point count."
+            }
+          >
+            <Tag color={countQuery.isError ? "red" : filterActive ? "blue" : undefined}>
+              {countQuery.isFetching
+                ? "Counting..."
+                : countQuery.isError
+                  ? "Count unavailable"
+                  : `${(pointCount ?? 0).toLocaleString()} ${filterActive ? "matching" : "total"}`}
+            </Tag>
+          </Tooltip>
+        </Space>
         <Space wrap>
           {filterActive ? <Tag color="blue">filtered</Tag> : null}
           <Button
@@ -1079,6 +1369,9 @@ const CollectionPointsPreview = ({
           ) : null}
           <Button icon={<Eye size={16} />} onClick={() => setRetrieveOpen(true)}>
             Retrieve
+          </Button>
+          <Button icon={<BarChart3 size={16} />} onClick={openFacetExplorer}>
+            Facets
           </Button>
           <Button icon={<Search size={16} />} onClick={() => setSearchOpen(true)}>
             Search points
@@ -1272,6 +1565,87 @@ const CollectionPointsPreview = ({
         </Space>
       </Modal>
       <Modal
+        title={`Payload facets in ${collectionName}`}
+        open={facetOpen}
+        okText="Run facet"
+        width={720}
+        confirmLoading={facetPointsMutation.isPending}
+        onOk={() => facetPointsMutation.mutate()}
+        onCancel={() => setFacetOpen(false)}
+      >
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Alert
+            type={payloadFields.length ? "info" : "warning"}
+            showIcon
+            message={
+              payloadFields.length
+                ? "Facet suggestions come from this collection's payload indexes."
+                : "No payload indexes are reported for this collection."
+            }
+            description="Qdrant facet queries normally require a matching payload index. The active point filter is applied automatically."
+          />
+          <div className="form-grid two">
+            <div>
+              <Typography.Text strong>Payload field</Typography.Text>
+              <AutoComplete
+                allowClear
+                value={facetKey}
+                options={payloadFields.map((field) => ({ value: field }))}
+                placeholder="category"
+                style={{ width: "100%", marginTop: 6 }}
+                onChange={setFacetKey}
+                filterOption={(input, option) =>
+                  String(option?.value ?? "").toLowerCase().includes(input.toLowerCase())
+                }
+              />
+            </div>
+            <div className="form-grid two">
+              <div>
+                <Typography.Text strong>Top values</Typography.Text>
+                <InputNumber
+                  min={1}
+                  max={100}
+                  precision={0}
+                  value={facetLimit}
+                  style={{ width: "100%", marginTop: 6 }}
+                  onChange={(value) => setFacetLimit(value ?? 10)}
+                />
+              </div>
+              <div>
+                <Typography.Text strong>Exact counts</Typography.Text>
+                <div style={{ marginTop: 10 }}>
+                  <Switch checked={facetExact} onChange={setFacetExact} />
+                </div>
+              </div>
+            </div>
+          </div>
+          {facetPointsMutation.isError ? (
+            <Alert
+              type="error"
+              showIcon
+              message="Unable to load facets"
+              description={
+                facetPointsMutation.error instanceof Error
+                  ? facetPointsMutation.error.message
+                  : undefined
+              }
+            />
+          ) : null}
+          {facetPointsMutation.data ? (
+            <Table
+              rowKey="key"
+              size="small"
+              columns={facetColumns}
+              dataSource={facetRows}
+              loading={facetPointsMutation.isPending}
+              pagination={false}
+              scroll={{ x: 460 }}
+              locale={{ emptyText: "No facet values found" }}
+            />
+          ) : null}
+        </Space>
+      </Modal>
+      <Modal
         title={`Upsert points into ${collectionName}`}
         open={upsertOpen}
         okText="Upsert"
@@ -1426,7 +1800,12 @@ export const CollectionsPage = () => {
   const [retryFailure, setRetryFailure] = useState<RetryableIndexFailure | null>(null);
   const [retryFieldName, setRetryFieldName] = useState("");
   const [retrySchemaJson, setRetrySchemaJson] = useState("");
-  const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
+  const [selectedCollection, setSelectedCollection] = useState<string | null>(() =>
+    getCollectionNameFromPath(window.location.pathname),
+  );
+  const [collectionSearch, setCollectionSearch] = useState("");
+  const [collectionHealthFilter, setCollectionHealthFilter] =
+    useState<CollectionHealthFilter>("all");
   const [form] = Form.useForm<CollectionFormValues>();
   const [indexForm] = Form.useForm<IndexInput>();
   const [aliasForm] = Form.useForm<{ aliasName: string }>();
@@ -1434,9 +1813,39 @@ export const CollectionsPage = () => {
   const vectorMode = Form.useWatch("vectorMode", form) ?? "single";
   const indexType = Form.useWatch("type", indexForm);
 
-  const collectionsQuery = useQuery({
-    queryKey: ["collections"],
-    queryFn: api.listCollections,
+  useEffect(() => {
+    const syncCollectionFromLocation = () => {
+      setSelectedCollection(getCollectionNameFromPath(window.location.pathname));
+    };
+
+    window.addEventListener("popstate", syncCollectionFromLocation);
+    return () => window.removeEventListener("popstate", syncCollectionFromLocation);
+  }, []);
+
+  useEffect(() => {
+    document.title = selectedCollection
+      ? `${selectedCollection} · Collections · Qdrant Local Admin`
+      : getPageDocumentTitle("collections");
+  }, [selectedCollection]);
+
+  const openCollectionDetails = (collectionName: string) => {
+    const path = getCollectionPath(collectionName);
+    if (window.location.pathname !== path) {
+      window.history.pushState({ page: "collections", collectionName }, "", path);
+    }
+    setSelectedCollection(collectionName);
+  };
+
+  const closeCollectionDetails = () => {
+    if (window.location.pathname !== "/collections") {
+      window.history.replaceState({ page: "collections" }, "", "/collections");
+    }
+    setSelectedCollection(null);
+  };
+
+  const collectionsOverviewQuery = useQuery({
+    queryKey: ["collections", "overview"],
+    queryFn: api.listCollectionOverview,
   });
 
   const aliasesQuery = useQuery({
@@ -1484,7 +1893,7 @@ export const CollectionsPage = () => {
     mutationFn: api.deleteCollection,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["collections"] });
-      setSelectedCollection(null);
+      closeCollectionDetails();
       message.success("Collection deleted.");
     },
     onError: (error) => {
@@ -1675,25 +2084,114 @@ export const CollectionsPage = () => {
     });
   };
 
-  const collections = collectionsQuery.data?.result?.collections ?? [];
+  const allCollections = collectionsOverviewQuery.data?.result?.collections ?? [];
+  const collections = filterCollectionOverview(
+    allCollections,
+    collectionSearch,
+    collectionHealthFilter,
+  );
+  const overviewErrors = collectionsOverviewQuery.data?.result?.errors ?? [];
+  const healthyCollectionCount = allCollections.filter(
+    (collection) => getCollectionHealth(collection).health === "healthy",
+  ).length;
+  const totalPointCount = allCollections.reduce(
+    (total, collection) => total + (collection.points_count ?? 0),
+    0,
+  );
+  const totalIndexedVectorCount = allCollections.reduce(
+    (total, collection) => total + (collection.indexed_vectors_count ?? 0),
+    0,
+  );
+  const indexedCoverage = totalPointCount
+    ? Math.min(100, Math.round((totalIndexedVectorCount / totalPointCount) * 100))
+    : 0;
   const collectionAliases =
     aliasesQuery.data?.result?.aliases.filter((alias) => alias.collection_name === selectedCollection) ?? [];
 
-  const columns: ColumnsType<CollectionSummary> = [
+  const columns: ColumnsType<CollectionOverview> = [
     {
       title: "Collection",
       dataIndex: "name",
-      width: 320,
+      width: 225,
       render: (name: string) => (
-        <Space className="collection-name-cell">
-          <Typography.Text strong>{name}</Typography.Text>
-          <Tag color="green">active</Tag>
+        <Tooltip title={name}>
+          <Typography.Link
+            strong
+            ellipsis
+            className="collection-name-cell"
+            href={getCollectionPath(name)}
+            onClick={(event) => {
+              event.preventDefault();
+              openCollectionDetails(name);
+            }}
+          >
+            {name}
+          </Typography.Link>
+        </Tooltip>
+      ),
+    },
+    {
+      title: "Status",
+      width: 125,
+      render: (_, collection) => {
+        const health = getCollectionHealth(collection);
+        return (
+          <Tooltip
+            title={
+              collection.error
+                ? describeCollectionOverviewError(collection)
+                : `Qdrant status: ${collection.status ?? "unknown"}`
+            }
+          >
+            <Space size={4}>
+              <Tag color={health.color}>{health.label}</Tag>
+              {typeof collection.update_queue_length === "number" &&
+              collection.update_queue_length > 0 ? (
+                <Tag>{collection.update_queue_length} queued</Tag>
+              ) : null}
+            </Space>
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: "Points",
+      dataIndex: "points_count",
+      width: 85,
+      align: "right",
+      sorter: (left, right) => (left.points_count ?? -1) - (right.points_count ?? -1),
+      render: formatCollectionMetric,
+    },
+    {
+      title: "Indexed",
+      dataIndex: "indexed_vectors_count",
+      width: 90,
+      align: "right",
+      sorter: (left, right) =>
+        (left.indexed_vectors_count ?? -1) - (right.indexed_vectors_count ?? -1),
+      render: formatCollectionMetric,
+    },
+    {
+      title: "Segments",
+      dataIndex: "segments_count",
+      width: 85,
+      align: "right",
+      sorter: (left, right) => (left.segments_count ?? -1) - (right.segments_count ?? -1),
+      render: formatCollectionMetric,
+    },
+    {
+      title: "Vector spaces",
+      width: 150,
+      render: (_, collection) => (
+        <Space size={4} wrap>
+          <Tag>{formatCollectionMetric(collection.dense_vector_count)} dense</Tag>
+          <Tag color="cyan">{formatCollectionMetric(collection.sparse_vector_count)} sparse</Tag>
         </Space>
       ),
     },
     {
       title: "Actions",
-      width: 150,
+      width: 105,
       align: "right",
       render: (_, record) => (
         <Space>
@@ -1701,7 +2199,7 @@ export const CollectionsPage = () => {
             <Button
               aria-label={`View ${record.name}`}
               icon={<Eye size={16} />}
-              onClick={() => setSelectedCollection(record.name)}
+              onClick={() => openCollectionDetails(record.name)}
             />
           </Tooltip>
           <Tooltip title="Delete collection">
@@ -1790,8 +2288,8 @@ export const CollectionsPage = () => {
             <Tooltip title="Refresh">
               <Button
                 icon={<RefreshCw size={16} />}
-                onClick={() => collectionsQuery.refetch()}
-                loading={collectionsQuery.isFetching}
+                onClick={() => collectionsOverviewQuery.refetch()}
+                loading={collectionsOverviewQuery.isFetching}
               />
             </Tooltip>
             <Button
@@ -1808,12 +2306,27 @@ export const CollectionsPage = () => {
         }
       />
 
-      {collectionsQuery.isError ? (
+      {collectionsOverviewQuery.isError ? (
         <Alert
           type="error"
           showIcon
           message="Unable to load collections"
-          description={collectionsQuery.error instanceof Error ? collectionsQuery.error.message : undefined}
+          description={
+            collectionsOverviewQuery.error instanceof Error
+              ? collectionsOverviewQuery.error.message
+              : undefined
+          }
+          style={{ marginBottom: 16 }}
+        />
+      ) : null}
+
+      {overviewErrors.length ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={`${overviewErrors.length} collection ${overviewErrors.length === 1 ? "detail is" : "details are"} unavailable`}
+          description="The remaining collection metrics loaded normally. Refresh to retry the unavailable rows."
+          action={<Button onClick={() => collectionsOverviewQuery.refetch()}>Retry</Button>}
           style={{ marginBottom: 16 }}
         />
       ) : null}
@@ -1833,14 +2346,76 @@ export const CollectionsPage = () => {
         />
       ) : null}
 
+      <section className="collection-summary" aria-label="Collection summary">
+        <div className="summary-metric">
+          <span className="summary-icon summary-icon-coral"><Waypoints size={18} /></span>
+          <div>
+            <Typography.Text type="secondary">Collections</Typography.Text>
+            <Typography.Title level={3}>{formatCollectionMetric(allCollections.length)}</Typography.Title>
+          </div>
+        </div>
+        <div className="summary-metric">
+          <span className="summary-icon summary-icon-green"><CircleCheckBig size={18} /></span>
+          <div>
+            <Typography.Text type="secondary">Healthy</Typography.Text>
+            <Typography.Title level={3}>{formatCollectionMetric(healthyCollectionCount)}</Typography.Title>
+          </div>
+        </div>
+        <div className="summary-metric">
+          <span className="summary-icon summary-icon-blue"><BarChart3 size={18} /></span>
+          <div>
+            <Typography.Text type="secondary">Total points</Typography.Text>
+            <Typography.Title level={3}>{formatCollectionMetric(totalPointCount)}</Typography.Title>
+          </div>
+        </div>
+        <div className="summary-metric">
+          <span className="summary-icon summary-icon-amber"><Gauge size={18} /></span>
+          <div>
+            <Typography.Text type="secondary">Indexed coverage</Typography.Text>
+            <Typography.Title level={3}>{indexedCoverage}%</Typography.Title>
+          </div>
+        </div>
+      </section>
+
       <div className="surface table-surface">
+        <div className="collection-table-controls">
+          <Input
+            allowClear
+            aria-label="Search collections"
+            prefix={<Search size={16} />}
+            placeholder="Search collections"
+            value={collectionSearch}
+            onChange={(event) => setCollectionSearch(event.target.value)}
+          />
+          <Select<CollectionHealthFilter>
+            aria-label="Filter collection status"
+            value={collectionHealthFilter}
+            onChange={setCollectionHealthFilter}
+            options={[
+              { value: "all", label: "All statuses" },
+              { value: "healthy", label: "Healthy" },
+              { value: "optimizing", label: "Optimizing / pending" },
+              { value: "degraded", label: "Degraded" },
+              { value: "unavailable", label: "Unavailable" },
+              { value: "unknown", label: "Unknown" },
+            ]}
+          />
+          <Typography.Text type="secondary">
+            {collections.length} of {allCollections.length}
+          </Typography.Text>
+        </div>
         <Table
           rowKey="name"
           columns={columns}
           dataSource={collections}
-          loading={collectionsQuery.isLoading || collectionsQuery.isFetching}
+          loading={collectionsOverviewQuery.isLoading || collectionsOverviewQuery.isFetching}
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
-          scroll={{ x: 500 }}
+          scroll={{ x: 865 }}
+          locale={{
+            emptyText: allCollections.length
+              ? "No collections match the current filters."
+              : "No collections found.",
+          }}
         />
       </div>
 
@@ -1848,7 +2423,7 @@ export const CollectionsPage = () => {
         title={selectedCollection}
         open={Boolean(selectedCollection)}
         width={760}
-        onClose={() => setSelectedCollection(null)}
+        onClose={closeCollectionDetails}
       >
         {detailsQuery.isLoading ? <Spin /> : null}
         {detailsQuery.isError ? (

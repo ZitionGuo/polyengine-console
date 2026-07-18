@@ -11,6 +11,30 @@ export interface CollectionSummary {
   name: string;
 }
 
+export interface CollectionOverviewError {
+  name: string;
+  status_code?: number | null;
+  detail?: unknown;
+}
+
+export interface CollectionOverview extends CollectionSummary {
+  status?: string | null;
+  optimizer_status?: unknown;
+  points_count?: number | null;
+  vectors_count?: number | null;
+  indexed_vectors_count?: number | null;
+  segments_count?: number | null;
+  dense_vector_count?: number | null;
+  sparse_vector_count?: number | null;
+  update_queue_length?: number | null;
+  error?: CollectionOverviewError;
+}
+
+export interface CollectionOverviewResult {
+  collections: CollectionOverview[];
+  errors: CollectionOverviewError[];
+}
+
 export interface AliasSummary {
   alias_name: string;
   collection_name: string;
@@ -25,6 +49,13 @@ export interface CollectionSnapshot {
   name: string;
   size: number;
   creation_time: string;
+  checksum?: string;
+}
+
+export type SnapshotPriority = "snapshot" | "replica" | "no_sync";
+
+export interface SnapshotRestoreOptions {
+  priority: SnapshotPriority;
   checksum?: string;
 }
 
@@ -116,6 +147,25 @@ export interface PointsRetrievePayload {
   with_vector?: boolean | string[];
 }
 
+export interface PointsCountPayload {
+  filter?: Record<string, unknown>;
+  exact?: boolean;
+  shard_key?: unknown;
+}
+
+export interface PointsFacetPayload {
+  key: string;
+  limit?: number;
+  filter?: Record<string, unknown>;
+  exact?: boolean;
+  shard_key?: unknown;
+}
+
+export interface PointsFacetHit {
+  value: unknown;
+  count: number;
+}
+
 export interface PointsDeletePayload {
   points: unknown[];
   wait?: boolean;
@@ -174,11 +224,13 @@ const extractErrorMessage = (detail: unknown) => {
 
 const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
   let response: Response;
+  const isMultipart =
+    typeof FormData !== "undefined" && init.body instanceof FormData;
   try {
     response = await fetch(path, {
       ...init,
       headers: {
-        "Content-Type": "application/json",
+        ...(isMultipart ? {} : { "Content-Type": "application/json" }),
         ...(init.headers ?? {}),
       },
     });
@@ -210,6 +262,11 @@ export const api = {
 
   listCollections: () =>
     request<QdrantEnvelope<{ collections: CollectionSummary[] }>>("/api/collections"),
+
+  listCollectionOverview: () =>
+    request<QdrantEnvelope<CollectionOverviewResult>>(
+      "/api/collections?include_details=true",
+    ),
 
   getCollection: (name: string) =>
     request<QdrantEnvelope<Record<string, unknown>>>(`/api/collections/${encodeURIComponent(name)}`),
@@ -248,6 +305,41 @@ export const api = {
   deleteCollectionSnapshot: (name: string, snapshotName: string) =>
     request<QdrantEnvelope>(
       `/api/collections/${encodeURIComponent(name)}/snapshots/${encodeURIComponent(snapshotName)}?wait=true`,
+      { method: "DELETE" },
+    ),
+
+  uploadCollectionSnapshot: (
+    name: string,
+    snapshot: File,
+    options: SnapshotRestoreOptions,
+  ) => {
+    const query = new URLSearchParams({
+      wait: "true",
+      priority: options.priority,
+    });
+    if (options.checksum) query.set("checksum", options.checksum);
+    const body = new FormData();
+    body.append("snapshot", snapshot, snapshot.name);
+    return request<QdrantEnvelope>(
+      `/api/collections/${encodeURIComponent(name)}/snapshots/upload?${query}`,
+      { method: "POST", body },
+    );
+  },
+
+  listStorageSnapshots: () =>
+    request<QdrantEnvelope<CollectionSnapshot[]>>("/api/snapshots"),
+
+  createStorageSnapshot: () =>
+    request<QdrantEnvelope<CollectionSnapshot>>("/api/snapshots?wait=true", {
+      method: "POST",
+    }),
+
+  storageSnapshotDownloadUrl: (snapshotName: string) =>
+    `/api/snapshots/${encodeURIComponent(snapshotName)}`,
+
+  deleteStorageSnapshot: (snapshotName: string) =>
+    request<QdrantEnvelope>(
+      `/api/snapshots/${encodeURIComponent(snapshotName)}?wait=true`,
       { method: "DELETE" },
     ),
 
@@ -291,6 +383,24 @@ export const api = {
   retrievePoints: (collectionName: string, payload: PointsRetrievePayload) =>
     request<QdrantEnvelope<Record<string, unknown>>>(
       `/api/collections/${encodeURIComponent(collectionName)}/points/retrieve`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  countPoints: (collectionName: string, payload: PointsCountPayload) =>
+    request<QdrantEnvelope<{ count: number }>>(
+      `/api/collections/${encodeURIComponent(collectionName)}/points/count`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  facetPoints: (collectionName: string, payload: PointsFacetPayload) =>
+    request<QdrantEnvelope<{ hits: PointsFacetHit[] }>>(
+      `/api/collections/${encodeURIComponent(collectionName)}/points/facet`,
       {
         method: "POST",
         body: JSON.stringify(payload),

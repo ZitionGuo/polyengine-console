@@ -7,6 +7,28 @@ describe("api service", () => {
     vi.unstubAllGlobals();
   });
 
+  it("loads the detailed collection overview without changing the base list endpoint", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ status: "ok", result: { collections: [] } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.listCollections();
+    await api.listCollectionOverview();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/collections", expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/collections?include_details=true",
+      expect.any(Object),
+    );
+  });
+
   it("posts alias create and update mutations to the backend alias API", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       Promise.resolve(
@@ -92,6 +114,67 @@ describe("api service", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/collections/docs%202026/optimizations?completed_limit=5",
       expect.any(Object),
+    );
+  });
+
+  it("uploads snapshot FormData without overriding the multipart content type", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "ok", result: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const snapshot = new File(["snapshot-data"], "backup.snapshot", {
+      type: "application/octet-stream",
+    });
+
+    await api.uploadCollectionSnapshot("docs copy", snapshot, {
+      priority: "snapshot",
+      checksum: "a".repeat(64),
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      `/api/collections/docs%20copy/snapshots/upload?wait=true&priority=snapshot&checksum=${"a".repeat(64)}`,
+    );
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual({});
+    expect(init.body).toBeInstanceOf(FormData);
+    const uploaded = (init.body as FormData).get("snapshot") as File;
+    expect(uploaded.name).toBe(snapshot.name);
+    expect(uploaded.size).toBe(snapshot.size);
+    expect(uploaded.type).toBe(snapshot.type);
+  });
+
+  it("calls full storage snapshot endpoints with encoded download and delete URLs", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ status: "ok", result: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.listStorageSnapshots();
+    await api.createStorageSnapshot();
+    expect(api.storageSnapshotDownloadUrl("full backup #1.snapshot")).toBe(
+      "/api/snapshots/full%20backup%20%231.snapshot",
+    );
+    await api.deleteStorageSnapshot("full backup #1.snapshot");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/snapshots", expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/snapshots?wait=true",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/snapshots/full%20backup%20%231.snapshot?wait=true",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 
@@ -182,6 +265,49 @@ describe("api service", () => {
           ids: [1, "abc"],
           with_payload: true,
           with_vector: false,
+        }),
+      }),
+    );
+  });
+
+  it("calls point count and facet endpoints with encoded collection names", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ status: "ok", result: {} }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const filter = { must: [{ key: "group", match: { value: "a" } }] };
+
+    await api.countPoints("docs copy", { filter, exact: true });
+    await api.facetPoints("docs copy", {
+      key: "source.type",
+      limit: 25,
+      filter,
+      exact: false,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/collections/docs%20copy/points/count",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ filter, exact: true }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/collections/docs%20copy/points/facet",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          key: "source.type",
+          limit: 25,
+          filter,
+          exact: false,
         }),
       }),
     );

@@ -4,17 +4,18 @@ A local Qdrant management console with a FastAPI proxy backend and a React + Typ
 
 ## Features
 
-- Collection list, detail drawer, creation, deletion, dense vectors, named vectors, sparse vectors, replica/shard options, on-disk payload, advanced JSON, and payload index creation/deletion. Failed post-create indexes keep the collection intact and can be inspected, edited, and retried from the UI.
+- Collection runtime overview with health, point/index/segment counts, vector-space counts, name search, status filtering, detail drawer, creation, and deletion. Dense vectors, named vectors, sparse vectors, replica/shard options, on-disk payload, advanced JSON, and payload index creation/deletion are supported. Failed post-create indexes keep the collection intact and can be inspected, edited, and retried from the UI.
 - Live collection tuning for replica/write consistency, payload storage, optimizer, HNSW, metadata, and other advanced Qdrant update fields.
-- Per-collection snapshot list, creation, streaming download, and deletion with size, creation time, and checksum display.
+- Per-collection snapshot list, creation, streaming download, multipart upload recovery, and deletion with size, creation time, and checksum display. Restore supports Qdrant recovery priority, optional SHA-256 verification, and explicit destructive confirmation.
+- Full storage snapshot management from the Cluster view, including creation, list, streaming download, checksum display, and deletion. Creation is limited to detected single-node deployments, and the UI explains that whole-storage restore requires restarting Qdrant with `--storage-snapshot`.
 - Structured optimization activity with queue totals, running task progress, idle segments, and recent completed work.
-- Point management inside collection details: scroll preview with first/previous/next navigation, JSON upsert, delete by point id, payload replacement/clearing without resending vectors, payload filter browsing, and vector query/search with score display.
+- Point management inside collection details: scroll preview with first/previous/next navigation, exact total or filtered counts, payload facet exploration, JSON upsert, delete by point id, payload replacement/clearing without resending vectors, payload filter browsing, and vector query/search with score display.
 - Alias list, create, rename, collection reassignment, and delete. Renaming and reassignment are submitted as one atomic Qdrant alias update.
 - Cluster status, telemetry summary, and per-collection shard state. Single-node instances use collection configuration directly instead of surfacing an expected cluster-endpoint failure.
 - REST console for raw Qdrant calls through the backend proxy, with common request templates, local history, upstream HTTP status/duration/response headers, response summaries, and confirmation for mutating methods.
 - Backend proxy keeps Qdrant response envelopes where possible and normalizes upstream errors into a consistent `detail` shape.
 - Collections, Aliases, Cluster, and REST Console are loaded on demand; production builds separate React, Ant Design, rc components, and icons into stable vendor chunks.
-- Each main view has a stable URL (`/collections`, `/aliases`, `/cluster`, `/rest`) with refresh and browser history support.
+- Each main view has a stable URL (`/collections`, `/aliases`, `/cluster`, `/rest`) with refresh and browser history support. Collection details use shareable, safely encoded `/collections/{name}` deep links that survive reloads and follow browser back/forward navigation.
 - The FastAPI lifespan owns pooled normal-request and streaming `httpx` clients, reusing Qdrant connections and closing them cleanly on shutdown.
 
 ## Project layout
@@ -62,11 +63,13 @@ CORS_ORIGINS='["http://localhost:5173","http://127.0.0.1:5173"]'
 ## API surface
 
 - `GET /api/health`
-- `GET /api/collections`, `GET /api/collections/{name}`, `PUT /api/collections/{name}`, `PATCH /api/collections/{name}`, `DELETE /api/collections/{name}`
-- `GET /api/collections/{name}/snapshots`, `POST /api/collections/{name}/snapshots`, `GET /api/collections/{name}/snapshots/{snapshot}`, `DELETE /api/collections/{name}/snapshots/{snapshot}`
+- `GET /api/collections` (optional `include_details=true` runtime overview), `GET /api/collections/{name}`, `PUT /api/collections/{name}`, `PATCH /api/collections/{name}`, `DELETE /api/collections/{name}`
+- `GET /api/collections/{name}/snapshots`, `POST /api/collections/{name}/snapshots`, `POST /api/collections/{name}/snapshots/upload`, `GET /api/collections/{name}/snapshots/{snapshot}`, `DELETE /api/collections/{name}/snapshots/{snapshot}`
+- `GET /api/snapshots`, `POST /api/snapshots`, `GET /api/snapshots/{snapshot}`, `DELETE /api/snapshots/{snapshot}`
 - `GET /api/collections/{name}/optimizations`
 - `PUT /api/collections/{name}/indexes`, `DELETE /api/collections/{name}/indexes/{field}`
 - `POST /api/collections/{name}/points/scroll`, `POST /api/collections/{name}/points/query`, `PUT /api/collections/{name}/points`, `POST /api/collections/{name}/points/delete`
+- `POST /api/collections/{name}/points/count`, `POST /api/collections/{name}/points/facet`
 - `PUT /api/collections/{name}/points/payload`, `POST /api/collections/{name}/points/payload/clear`
 - `GET /api/aliases`, `POST /api/aliases`, `PATCH /api/aliases/{old_alias}`, `DELETE /api/aliases/{alias}`
 - `GET /api/cluster`, `GET /api/cluster/telemetry`, `GET /api/collections/{name}/cluster`

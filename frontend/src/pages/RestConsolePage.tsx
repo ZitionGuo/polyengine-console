@@ -179,7 +179,7 @@ export const RestConsolePage = () => {
       />
 
       <div className="console-layout">
-        <section className="surface" style={{ padding: 16 }}>
+        <section className="surface console-workbench">
           <Space direction="vertical" size={14} style={{ width: "100%" }}>
             <div className="console-method-path">
               <Select value={method} onChange={setMethod} options={methods.map((value) => ({ value, label: value }))} />
@@ -307,7 +307,7 @@ export const RestConsolePage = () => {
           </Space>
         </section>
 
-        <aside className="surface" style={{ padding: 16 }}>
+        <aside className="surface console-history">
           <Space direction="vertical" size={12} style={{ width: "100%" }}>
             <Space style={{ width: "100%", justifyContent: "space-between" }}>
               <Typography.Title level={3}>History</Typography.Title>

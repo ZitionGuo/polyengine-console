@@ -73,6 +73,20 @@ class PointsRetrieveRequest(BaseModel):
     with_vector: Any = False
 
 
+class PointsCountRequest(BaseModel):
+    filter: dict[str, Any] | None = None
+    exact: bool = True
+    shard_key: Any | None = None
+
+
+class PointsFacetRequest(BaseModel):
+    key: NonEmptyName
+    limit: int = Field(default=10, ge=1, le=100)
+    filter: dict[str, Any] | None = None
+    exact: bool = False
+    shard_key: Any | None = None
+
+
 class PointsDeleteRequest(BaseModel):
     points: list[Any] = Field(min_length=1)
 
