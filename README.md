@@ -58,7 +58,7 @@ Start the Qdrant adapter:
 ```bash
 cd services/qdrant-api
 cp .env.example .env
-../../.venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+../../.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Start the Solr adapter in another terminal:
@@ -66,7 +66,7 @@ Start the Solr adapter in another terminal:
 ```bash
 cd services/solr-api
 cp .env.example .env
-../../.venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8010
+../../.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8010
 ```
 
 Start the unified console:
