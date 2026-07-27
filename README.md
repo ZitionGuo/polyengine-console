@@ -1,26 +1,76 @@
+<div align="center">
+
 # PolyEngine Console
 
-PolyEngine Console is a local operations workspace for multiple search and data engines. It combines the existing Qdrant administration tools with a Solr vector-search workbench while keeping each engine behind an independent FastAPI adapter.
+**One local control plane for vector databases and search engines.**
 
-The default route is an engine overview. Qdrant and Solr workflows live under separate route and API namespaces, so an unavailable engine does not block the rest of the console.
+Operate Qdrant, explore Solr vector relevance, and keep each engine isolated behind a dedicated API adapter.
 
-## Features
+![React](https://img.shields.io/badge/React-18-149eca?style=flat-square&logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Ant Design](https://img.shields.io/badge/Ant_Design-5-1677ff?style=flat-square&logo=antdesign&logoColor=white)
+![Qdrant](https://img.shields.io/badge/Qdrant-supported-dc244c?style=flat-square)
+![Solr](https://img.shields.io/badge/Solr-supported-d9411e?style=flat-square&logo=apache-solr&logoColor=white)
 
-### Qdrant
+</div>
 
-- Collection runtime overview, creation, deletion, live configuration, dense/named/sparse vectors, payload indexes, point browsing, vector queries, facets, and payload operations.
-- Collection and storage snapshots, restore controls, optimization activity, aliases, cluster state, and telemetry.
-- REST Console with templates, local history, response metadata, and confirmation for mutating requests.
+![PolyEngine Console overview](docs/images/overview.jpg)
 
-### Solr
+PolyEngine Console is a modular administration workspace for local search infrastructure. The default screen is an engine health overview rather than an engine-specific page. Qdrant and Solr keep separate routes, query caches, health checks, and FastAPI processes, so one unavailable engine never blocks the other.
 
-- Plain-English semantic and hybrid search with automatic embeddings.
-- Explicit topK, candidate, rerank, score-threshold, timeout, and fusion controls.
-- Single-field, multi-field comparison, and weighted multi-vector fusion workflows.
-- Collection schema readiness, query diagnostics, result inspection, search history, and JSON/JSONL/CSV ingestion jobs.
-- English embeddings from `sentence-transformers/all-MiniLM-L6-v2`.
+## Highlights
 
-## Repository layout
+| Area | What it provides |
+| --- | --- |
+| **Unified workspace** | Engine overview, grouped navigation, live health indicators, responsive desktop/mobile shell, and isolated failure states. |
+| **Qdrant operations** | Collections, dense/named/sparse vectors, payload indexes, points, aliases, snapshots, optimization activity, cluster telemetry, and a guarded REST console. |
+| **Solr vector search** | Plain-English query embeddings, semantic and hybrid retrieval, explicit topK, multi-vector comparison and fusion, diagnostics, relevance inspection, and ingestion jobs. |
+| **Local-first security** | API keys and credentials stay in backend-only `.env` files. The browser communicates only with namespaced local adapters. |
+| **Extensible foundation** | An engine registry and namespaced module layout are ready for future Elasticsearch and Dgraph adapters. |
+
+## Interface
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/solr-vector-search.jpg" alt="Solr vector search workbench" />
+      <br />
+      <strong>Solr Vector Search</strong><br />
+      Text-to-vector search with topK, candidate, rerank, timeout, comparison, and weighted fusion controls.
+    </td>
+    <td width="50%">
+      <img src="docs/images/qdrant-collections.jpg" alt="Qdrant collection management" />
+      <br />
+      <strong>Qdrant Collections</strong><br />
+      Collection lifecycle, vector configuration, payload indexes, points, snapshots, and optimization workflows.
+    </td>
+  </tr>
+</table>
+
+The screenshots also demonstrate the console's failure isolation: when a local engine is stopped, its module shows a contextual diagnostic while the rest of the workspace remains usable.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Browser["React Console<br/>localhost:5173"]
+    QAPI["Qdrant Adapter<br/>localhost:8000"]
+    SAPI["Solr Adapter<br/>localhost:8010"]
+    Qdrant["Qdrant<br/>localhost:6333"]
+    Solr["SolrCloud<br/>localhost:8983"]
+    Model["Sentence Transformers<br/>all-MiniLM-L6-v2"]
+
+    Browser -->|"/api/qdrant/*"| QAPI
+    Browser -->|"/api/solr/*"| SAPI
+    QAPI --> Qdrant
+    SAPI --> Solr
+    SAPI --> Model
+```
+
+The React application owns navigation and presentation only. Each Python adapter owns upstream credentials, response normalization, connection pooling, and engine-specific behavior.
+
+## Repository Layout
 
 ```text
 apps/
@@ -29,116 +79,199 @@ services/
   qdrant-api/           FastAPI adapter for Qdrant
   solr-api/             FastAPI adapter for Solr and the embedding model
 samples/
-  solr/                 Synthetic data and multi-vector indexing scripts
+  solr/                 500 synthetic documents and indexing utilities
 docs/
-  solr-vector.md        Solr vector-search notes
+  images/               README screenshots
+  solr-vector.md        Solr vector-search behavior and compatibility
 compose.solr.yml        Optional local SolrCloud service
 ```
 
-## Requirements
+## Quick Start
 
-- Node.js 20 or newer.
-- Python 3.11 or newer.
-- Qdrant available at `http://localhost:6333`.
-- SolrCloud available at `http://localhost:8983/solr`.
-- Network access the first time the embedding model is downloaded. Later starts use the local Hugging Face cache.
+### Prerequisites
 
-## Run locally
+- Node.js 20 or newer
+- Python 3.11 or newer
+- Qdrant at `http://localhost:6333`
+- SolrCloud at `http://localhost:8983/solr`
+- Network access the first time the embedding model is downloaded
 
-Create a Python environment at the repository root and install both adapters:
+Clone the repository and install dependencies:
 
 ```bash
+git clone https://github.com/ZitionGuo/polyengine-console.git
+cd polyengine-console
+
 python3 -m venv .venv
-.venv/bin/pip install -r services/qdrant-api/requirements.txt
-.venv/bin/pip install -r services/solr-api/requirements.txt
+.venv/bin/python -m pip install -r services/qdrant-api/requirements.txt
+.venv/bin/python -m pip install -r services/solr-api/requirements.txt
+
+cd apps/console
+npm install
+cd ../..
 ```
 
-Start the Qdrant adapter:
+### 1. Start the Qdrant adapter
 
 ```bash
 cd services/qdrant-api
 cp .env.example .env
-../../.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+../../.venv/bin/python -m uvicorn app.main:app \
+  --reload --host 127.0.0.1 --port 8000
 ```
 
-Start the Solr adapter in another terminal:
+### 2. Start the Solr adapter
 
 ```bash
 cd services/solr-api
 cp .env.example .env
-../../.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8010
+../../.venv/bin/python -m uvicorn app.main:app \
+  --reload --host 127.0.0.1 --port 8010
 ```
 
-Start the unified console:
+### 3. Start the console
 
 ```bash
 cd apps/console
-npm install
 npm run dev
 ```
 
-Open `http://localhost:5173/`. Vite forwards `/api/qdrant/*` to port `8000` and `/api/solr/*` to port `8010`.
+Open [http://localhost:5173](http://localhost:5173).
 
-An optional local SolrCloud instance is included:
+Vite forwards `/api/qdrant/*` to port `8000` and `/api/solr/*` to port `8010`. Qdrant and Solr themselves remain independent local services.
+
+### Optional local SolrCloud
 
 ```bash
 docker compose -f compose.solr.yml up -d
 ```
 
-## Configuration
-
-Qdrant settings belong in `services/qdrant-api/.env`:
-
-- `QDRANT_URL`, default `http://localhost:6333`
-- `QDRANT_API_KEY`, optional and never exposed to the browser
-- `CORS_ORIGINS`, optional list of allowed console origins
-
-Solr settings belong in `services/solr-api/.env`:
-
-- `SOLR_URL`, default `http://localhost:8983/solr`
-- `SOLR_USERNAME` and `SOLR_PASSWORD`, optional Basic Auth credentials
-- `EMBEDDING_MODEL`, default `sentence-transformers/all-MiniLM-L6-v2`
-- `EMBEDDING_DIMENSION`, default `384`
-- Search timeout, model cache, upload, and ingestion limits documented in `.env.example`
-
-Only `.env.example` files belong in Git. Real `.env` files, credentials, caches, uploads, and model data stay local.
-
 ## Routes
 
-- `/` engine overview
-- `/qdrant/collections`, `/qdrant/aliases`, `/qdrant/cluster`, `/qdrant/rest`
-- `/solr/collections`, `/solr/search`, `/solr/ingest`
+| Route | Module |
+| --- | --- |
+| `/` | Engine overview |
+| `/qdrant/collections` | Qdrant collections and collection details |
+| `/qdrant/aliases` | Qdrant alias management |
+| `/qdrant/cluster` | Cluster, telemetry, shards, and storage snapshots |
+| `/qdrant/rest` | Guarded Qdrant REST console |
+| `/solr/collections` | Solr schema and vector-field readiness |
+| `/solr/search` | Semantic, hybrid, comparison, and fusion search |
+| `/solr/ingest` | Upload and background embedding jobs |
 
 Legacy `/collections`, `/aliases`, `/cluster`, `/rest`, `/search`, and `/ingest` paths redirect to their namespaced replacements.
 
-## Solr demo data
+## Configuration
 
-`samples/solr/solr_vector_demo_500.jsonl` contains 500 deterministic synthetic English documents. Regenerate it with:
+Real credentials belong only in local `.env` files. Those files are ignored by Git; commit only `.env.example`.
+
+### Qdrant adapter
+
+File: `services/qdrant-api/.env`
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `QDRANT_URL` | `http://localhost:6333` | Qdrant REST endpoint |
+| `QDRANT_API_KEY` | empty | Optional `api-key` value sent upstream |
+| `CORS_ORIGINS` | localhost console origins | Allowed browser origins |
+
+### Solr adapter
+
+File: `services/solr-api/.env`
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SOLR_URL` | `http://localhost:8983/solr` | Solr base endpoint |
+| `SOLR_USERNAME` | empty | Optional Basic Auth username |
+| `SOLR_PASSWORD` | empty | Optional Basic Auth password |
+| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | English embedding model |
+| `EMBEDDING_DIMENSION` | `384` | Required Solr vector dimension |
+| `SOLR_READ_TIMEOUT_SECONDS` | `30` | Upstream response timeout |
+| `MAX_UPLOAD_MB` | `100` | Ingestion upload limit |
+| `INGEST_BATCH_SIZE` | `64` | Default embedding/indexing batch size |
+
+See [`services/solr-api/.env.example`](services/solr-api/.env.example) for cache, timeout, and ingestion settings.
+
+## Solr Demo Dataset
+
+[`samples/solr/solr_vector_demo_500.jsonl`](samples/solr/solr_vector_demo_500.jsonl) contains 500 deterministic synthetic English operations guides.
+
+Regenerate the file:
 
 ```bash
-python3 samples/solr/generate_demo_data.py
+.venv/bin/python samples/solr/generate_demo_data.py
 ```
 
-After creating a compatible Solr collection with `embedding` and `embedding_title` 384-dimensional `DenseVectorField` fields, index both vectors with:
+After creating a Solr collection with compatible `embedding` and `embedding_title` 384-dimensional `DenseVectorField` fields, index both vectors:
 
 ```bash
 .venv/bin/python samples/solr/index_multi_vector_demo.py
 ```
 
-The indexing script intentionally loads the embedding model from the local cache.
+The indexing script loads the embedding model from the local Hugging Face cache.
 
-## Verification
+## Development
+
+Run all automated checks:
 
 ```bash
 cd services/qdrant-api
-../../.venv/bin/pytest
+../../.venv/bin/python -m pytest
 
 cd ../solr-api
-../../.venv/bin/pytest
+../../.venv/bin/python -m pytest
 
 cd ../../apps/console
 npm run test
 npm run build
 ```
 
-Health checks are available through the frontend gateway at `/api/qdrant/health` and `/api/solr/health`.
+Current coverage includes Qdrant alias actions, collection/index workflows, snapshots, point operations, REST proxy safeguards, Solr embedding and ingestion behavior, semantic/hybrid/fusion payloads, timeout and cancellation behavior, engine routing, legacy redirects, and single-engine failure isolation.
+
+## Troubleshooting
+
+### An engine shows `Unavailable`
+
+Check the adapter first:
+
+```bash
+curl -i http://localhost:5173/api/qdrant/health
+curl -i http://localhost:5173/api/solr/health
+```
+
+A `503` with a normalized `detail` body means the adapter is running but its upstream engine cannot be reached. Confirm Qdrant on port `6333` or Solr on port `8983`.
+
+### The Solr model is not loaded
+
+Use **Load model** from Overview, or call:
+
+```bash
+curl -X POST http://localhost:5173/api/solr/model/load
+```
+
+The first load may download model files. Later loads use the local cache.
+
+### A Solr vector field is incompatible
+
+The field must be a `DenseVectorField` using `FLOAT32`, and its dimension must match `EMBEDDING_DIMENSION`. The default model requires 384 dimensions.
+
+### A moved virtual environment no longer starts scripts
+
+Virtual-environment console scripts contain absolute shebang paths. Use `.venv/bin/python -m <module>` as shown above, or recreate `.venv` after moving the repository.
+
+## Security Notes
+
+- Qdrant API keys and Solr credentials are injected by Python adapters and never returned to the browser.
+- The Qdrant REST proxy accepts relative Qdrant paths only; it cannot proxy arbitrary external URLs.
+- Mutating REST Console requests require confirmation.
+- `.env`, virtual environments, model caches, uploads, build output, and dependency folders are excluded from Git.
+- The included Solr dataset is synthetic and contains no personal or production data.
+
+## Roadmap
+
+- Elasticsearch search and index operations
+- Dgraph schema and graph exploration
+- Shared connection profiles for multiple instances per engine
+- Optional packaged local development runtime
+
+Contributions can follow the existing engine registry, namespaced frontend module, and independent FastAPI adapter pattern.
