@@ -1,0 +1,16 @@
+services:
+  solr:
+    image: solr:9.10
+    command: ["solr-foreground", "-c"]
+    ports:
+      - "8983:8983"
+    volumes:
+      - solr-vector-data:/var/solr
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8983/solr/admin/info/system?wt=json"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  solr-vector-data:

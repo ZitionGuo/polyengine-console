@@ -1,0 +1,4 @@
+{"id":"guide-1","title":"Zero-downtime schema migrations","body":"Plan compatible schema changes, deploy readers first, and backfill data without interrupting production traffic."}
+{"id":"guide-2","title":"Vector search tuning","body":"Tune nearest-neighbor retrieval by separating the number of returned results from the candidate pool and reranking window."}
+{"id":"guide-3","title":"SolrCloud backup operations","body":"Create collection backups, verify repository configuration, and test restore procedures before an incident."}
+{"id":"guide-4","title":"Reliable API deployments","body":"Use health checks, gradual rollouts, and rollback automation to reduce downtime during application releases."}

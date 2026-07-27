@@ -1,104 +1,144 @@
-# Qdrant Local Admin
+# PolyEngine Console
 
-A local Qdrant management console with a FastAPI proxy backend and a React + TypeScript + Vite frontend.
+PolyEngine Console is a local operations workspace for multiple search and data engines. It combines the existing Qdrant administration tools with a Solr vector-search workbench while keeping each engine behind an independent FastAPI adapter.
+
+The default route is an engine overview. Qdrant and Solr workflows live under separate route and API namespaces, so an unavailable engine does not block the rest of the console.
 
 ## Features
 
-- Collection runtime overview with health, point/index/segment counts, vector-space counts, name search, status filtering, detail drawer, creation, and deletion. Dense vectors, named vectors, sparse vectors, replica/shard options, on-disk payload, advanced JSON, and payload index creation/deletion are supported. Failed post-create indexes keep the collection intact and can be inspected, edited, and retried from the UI.
-- Live collection tuning for replica/write consistency, payload storage, optimizer, HNSW, metadata, and other advanced Qdrant update fields.
-- Per-collection snapshot list, creation, streaming download, multipart upload recovery, and deletion with size, creation time, and checksum display. Restore supports Qdrant recovery priority, optional SHA-256 verification, and explicit destructive confirmation.
-- Full storage snapshot management from the Cluster view, including creation, list, streaming download, checksum display, and deletion. Creation is limited to detected single-node deployments, and the UI explains that whole-storage restore requires restarting Qdrant with `--storage-snapshot`.
-- Structured optimization activity with queue totals, running task progress, idle segments, and recent completed work.
-- Point management inside collection details: scroll preview with first/previous/next navigation, exact total or filtered counts, payload facet exploration, JSON upsert, delete by point id, payload replacement/clearing without resending vectors, payload filter browsing, and vector query/search with score display.
-- Alias list, create, rename, collection reassignment, and delete. Renaming and reassignment are submitted as one atomic Qdrant alias update.
-- Cluster status, telemetry summary, and per-collection shard state. Single-node instances use collection configuration directly instead of surfacing an expected cluster-endpoint failure.
-- REST console for raw Qdrant calls through the backend proxy, with common request templates, local history, upstream HTTP status/duration/response headers, response summaries, and confirmation for mutating methods.
-- Backend proxy keeps Qdrant response envelopes where possible and normalizes upstream errors into a consistent `detail` shape.
-- Collections, Aliases, Cluster, and REST Console are loaded on demand; production builds separate React, Ant Design, rc components, and icons into stable vendor chunks.
-- Each main view has a stable URL (`/collections`, `/aliases`, `/cluster`, `/rest`) with refresh and browser history support. Collection details use shareable, safely encoded `/collections/{name}` deep links that survive reloads and follow browser back/forward navigation.
-- The FastAPI lifespan owns pooled normal-request and streaming `httpx` clients, reusing Qdrant connections and closing them cleanly on shutdown.
+### Qdrant
 
-## Project layout
+- Collection runtime overview, creation, deletion, live configuration, dense/named/sparse vectors, payload indexes, point browsing, vector queries, facets, and payload operations.
+- Collection and storage snapshots, restore controls, optimization activity, aliases, cluster state, and telemetry.
+- REST Console with templates, local history, response metadata, and confirmation for mutating requests.
+
+### Solr
+
+- Plain-English semantic and hybrid search with automatic embeddings.
+- Explicit topK, candidate, rerank, score-threshold, timeout, and fusion controls.
+- Single-field, multi-field comparison, and weighted multi-vector fusion workflows.
+- Collection schema readiness, query diagnostics, result inspection, search history, and JSON/JSONL/CSV ingestion jobs.
+- English embeddings from `sentence-transformers/all-MiniLM-L6-v2`.
+
+## Repository layout
 
 ```text
-backend/   FastAPI proxy API, Qdrant HTTP client, pytest coverage
-frontend/  React + TypeScript + Vite + Ant Design + TanStack Query
+apps/
+  console/              React, TypeScript, Vite, Ant Design, TanStack Query
+services/
+  qdrant-api/           FastAPI adapter for Qdrant
+  solr-api/             FastAPI adapter for Solr and the embedding model
+samples/
+  solr/                 Synthetic data and multi-vector indexing scripts
+docs/
+  solr-vector.md        Solr vector-search notes
+compose.solr.yml        Optional local SolrCloud service
 ```
+
+## Requirements
+
+- Node.js 20 or newer.
+- Python 3.11 or newer.
+- Qdrant available at `http://localhost:6333`.
+- SolrCloud available at `http://localhost:8983/solr`.
+- Network access the first time the embedding model is downloaded. Later starts use the local Hugging Face cache.
 
 ## Run locally
 
-Use Node 20+ LTS for the frontend. The current repository includes a Python 3.13 virtual environment path, but any compatible virtual environment is fine.
+Create a Python environment at the repository root and install both adapters:
 
 ```bash
-cd backend
-cp .env.example .env
-../.venv/bin/pip install -r requirements.txt
-../.venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+python3 -m venv .venv
+.venv/bin/pip install -r services/qdrant-api/requirements.txt
+.venv/bin/pip install -r services/solr-api/requirements.txt
 ```
 
-In a second terminal:
+Start the Qdrant adapter:
 
 ```bash
-cd frontend
+cd services/qdrant-api
+cp .env.example .env
+../../.venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Start the Solr adapter in another terminal:
+
+```bash
+cd services/solr-api
+cp .env.example .env
+../../.venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8010
+```
+
+Start the unified console:
+
+```bash
+cd apps/console
 npm install
 npm run dev
 ```
 
-Open `http://localhost:5173/collections`. The frontend proxies `/api` to `http://127.0.0.1:8000`.
+Open `http://localhost:5173/`. Vite forwards `/api/qdrant/*` to port `8000` and `/api/solr/*` to port `8010`.
 
-The backend talks to Qdrant through `QDRANT_URL` and ignores host proxy environment variables for those upstream calls, which keeps local `localhost:6333` requests from being accidentally routed through a system proxy.
+An optional local SolrCloud instance is included:
+
+```bash
+docker compose -f compose.solr.yml up -d
+```
 
 ## Configuration
 
-Backend environment variables:
+Qdrant settings belong in `services/qdrant-api/.env`:
 
-- `QDRANT_URL`: defaults to `http://localhost:6333`.
-- `QDRANT_API_KEY`: optional Qdrant API key. When set, the backend sends it as the `api-key` header.
-- `CORS_ORIGINS`: optional Pydantic settings list override if you need a different frontend origin. Example:
+- `QDRANT_URL`, default `http://localhost:6333`
+- `QDRANT_API_KEY`, optional and never exposed to the browser
+- `CORS_ORIGINS`, optional list of allowed console origins
+
+Solr settings belong in `services/solr-api/.env`:
+
+- `SOLR_URL`, default `http://localhost:8983/solr`
+- `SOLR_USERNAME` and `SOLR_PASSWORD`, optional Basic Auth credentials
+- `EMBEDDING_MODEL`, default `sentence-transformers/all-MiniLM-L6-v2`
+- `EMBEDDING_DIMENSION`, default `384`
+- Search timeout, model cache, upload, and ingestion limits documented in `.env.example`
+
+Only `.env.example` files belong in Git. Real `.env` files, credentials, caches, uploads, and model data stay local.
+
+## Routes
+
+- `/` engine overview
+- `/qdrant/collections`, `/qdrant/aliases`, `/qdrant/cluster`, `/qdrant/rest`
+- `/solr/collections`, `/solr/search`, `/solr/ingest`
+
+Legacy `/collections`, `/aliases`, `/cluster`, `/rest`, `/search`, and `/ingest` paths redirect to their namespaced replacements.
+
+## Solr demo data
+
+`samples/solr/solr_vector_demo_500.jsonl` contains 500 deterministic synthetic English documents. Regenerate it with:
 
 ```bash
-CORS_ORIGINS='["http://localhost:5173","http://127.0.0.1:5173"]'
+python3 samples/solr/generate_demo_data.py
 ```
 
-## API surface
+After creating a compatible Solr collection with `embedding` and `embedding_title` 384-dimensional `DenseVectorField` fields, index both vectors with:
 
-- `GET /api/health`
-- `GET /api/collections` (optional `include_details=true` runtime overview), `GET /api/collections/{name}`, `PUT /api/collections/{name}`, `PATCH /api/collections/{name}`, `DELETE /api/collections/{name}`
-- `GET /api/collections/{name}/snapshots`, `POST /api/collections/{name}/snapshots`, `POST /api/collections/{name}/snapshots/upload`, `GET /api/collections/{name}/snapshots/{snapshot}`, `DELETE /api/collections/{name}/snapshots/{snapshot}`
-- `GET /api/snapshots`, `POST /api/snapshots`, `GET /api/snapshots/{snapshot}`, `DELETE /api/snapshots/{snapshot}`
-- `GET /api/collections/{name}/optimizations`
-- `PUT /api/collections/{name}/indexes`, `DELETE /api/collections/{name}/indexes/{field}`
-- `POST /api/collections/{name}/points/scroll`, `POST /api/collections/{name}/points/query`, `PUT /api/collections/{name}/points`, `POST /api/collections/{name}/points/delete`
-- `POST /api/collections/{name}/points/count`, `POST /api/collections/{name}/points/facet`
-- `PUT /api/collections/{name}/points/payload`, `POST /api/collections/{name}/points/payload/clear`
-- `GET /api/aliases`, `POST /api/aliases`, `PATCH /api/aliases/{old_alias}`, `DELETE /api/aliases/{alias}`
-- `GET /api/cluster`, `GET /api/cluster/telemetry`, `GET /api/collections/{name}/cluster`
-- `POST /api/rest`
-
-Successful REST Console proxy calls return metadata alongside the unmodified Qdrant body:
-
-```json
-{
-  "status_code": 200,
-  "headers": { "content-type": "application/json" },
-  "duration_ms": 12.345,
-  "body": { "result": {}, "status": "ok", "time": 0.001 }
-}
+```bash
+.venv/bin/python samples/solr/index_multi_vector_demo.py
 ```
 
-Only non-sensitive response headers are included. Upstream errors continue to use the shared `detail: { message, upstream_status, upstream_body }` error shape and the upstream HTTP status.
+The indexing script intentionally loads the embedding model from the local cache.
 
 ## Verification
 
 ```bash
-cd backend
-../.venv/bin/pytest
+cd services/qdrant-api
+../../.venv/bin/pytest
 
-cd ../frontend
+cd ../solr-api
+../../.venv/bin/pytest
+
+cd ../../apps/console
 npm run test
 npm run build
 ```
 
-If Qdrant is reachable from the backend process, `GET /api/health` returns the upstream Qdrant root response.
-
-For a quick local smoke test, create a temporary collection from the UI, upsert a point from the collection drawer, scroll/filter/query it, then delete the temporary collection.
+Health checks are available through the frontend gateway at `/api/qdrant/health` and `/api/solr/health`.
