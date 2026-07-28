@@ -271,7 +271,7 @@ export const VectorSearchPage = () => {
   const [form] = Form.useForm<SearchFormValues>();
   const requestCoordinator = useRef(new LatestRequestCoordinator()).current;
   const [mode, setMode] = useState<"semantic" | "hybrid">("semantic");
-  const [targetMode, setTargetMode] = useState<"single" | "compare" | "fuse">("fuse");
+  const [targetMode, setTargetMode] = useState<"single" | "compare" | "fuse">("single");
   const [collection, setCollection] = useState(selectedCollection());
   const [compareFields, setCompareFields] = useState<string[]>([]);
   const [fusionWeights, setFusionWeights] = useState<Record<string, number>>({});
@@ -445,7 +445,7 @@ export const VectorSearchPage = () => {
   const changeCollection = (value: string) => {
     resetResults();
     setFilterRules([]);
-    setTargetMode("fuse");
+    setTargetMode("single");
     setCompareFields([]);
     setVectorMinScores({});
     setCollection(value);

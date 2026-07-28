@@ -15,7 +15,7 @@ Operate Qdrant, explore Solr vector relevance, and keep each engine isolated beh
 
 </div>
 
-![PolyEngine Console overview](docs/images/overview.jpg)
+![PolyEngine Console overview with Qdrant and Solr connected](docs/images/overview.png)
 
 PolyEngine Console is a modular administration workspace for local search infrastructure. The default screen is an engine health overview rather than an engine-specific page. Qdrant and Solr keep separate routes, query caches, health checks, and FastAPI processes, so one unavailable engine never blocks the other.
 
@@ -31,24 +31,19 @@ PolyEngine Console is a modular administration workspace for local search infras
 
 ## Interface
 
-<table>
-  <tr>
-    <td width="50%">
-      <img src="docs/images/solr-vector-search.jpg" alt="Solr vector search workbench" />
-      <br />
-      <strong>Solr Vector Search</strong><br />
-      Text-to-vector search with topK, candidate, rerank, timeout, comparison, and weighted fusion controls.
-    </td>
-    <td width="50%">
-      <img src="docs/images/qdrant-collections.jpg" alt="Qdrant collection management" />
-      <br />
-      <strong>Qdrant Collections</strong><br />
-      Collection lifecycle, vector configuration, payload indexes, points, snapshots, and optimization workflows.
-    </td>
-  </tr>
-</table>
+### Solr vector search
 
-The screenshots also demonstrate the console's failure isolation: when a local engine is stopped, its module shows a contextual diagnostic while the rest of the workspace remains usable.
+Write a plain-English query and let the local embedding adapter build the Solr KNN request. The workbench keeps topK, vector-field selection, semantic/hybrid mode, multi-field comparison and fusion, score diagnostics, timing, relevance judgments, and exports in one place.
+
+![Solr vector search results with topK scores and timing diagnostics](docs/images/solr-vector-search.png)
+
+### Qdrant operations
+
+Scan collection health, point and index counts, dense and sparse vector spaces, optimization activity, and lifecycle actions before drilling into vectors, payload indexes, points, aliases, snapshots, or cluster placement.
+
+![Qdrant collection health and vector-space management](docs/images/qdrant-collections.png)
+
+Screenshots use deterministic synthetic sample data and successful API-contract fixtures; they contain no production data. At runtime, each engine still has an isolated error state, so a stopped Qdrant instance does not block Solr workflows and vice versa.
 
 ## Architecture
 
@@ -111,7 +106,21 @@ npm install
 cd ../..
 ```
 
-### 1. Start the Qdrant adapter
+Start all three development processes from the repository root:
+
+```bash
+./scripts/dev.sh
+```
+
+Open [http://localhost:5173](http://localhost:5173). Press `Ctrl+C` once to stop the console and both API adapters.
+
+The script expects Qdrant and Solr themselves to be running at the configured URLs. It does not start, stop, or modify either database.
+
+### Start services separately
+
+Use separate terminals when debugging an individual adapter.
+
+#### Qdrant adapter
 
 ```bash
 cd services/qdrant-api
@@ -120,7 +129,7 @@ cp .env.example .env
   --reload --host 127.0.0.1 --port 8000
 ```
 
-### 2. Start the Solr adapter
+#### Solr adapter
 
 ```bash
 cd services/solr-api
@@ -129,14 +138,12 @@ cp .env.example .env
   --reload --host 127.0.0.1 --port 8010
 ```
 
-### 3. Start the console
+#### React console
 
 ```bash
 cd apps/console
 npm run dev
 ```
-
-Open [http://localhost:5173](http://localhost:5173).
 
 Vite forwards `/api/qdrant/*` to port `8000` and `/api/solr/*` to port `8010`. Qdrant and Solr themselves remain independent local services.
 
