@@ -128,6 +128,19 @@ async def test_ingest_job_tracks_success_and_row_errors(tmp_path):
     assert len(solr.writes) == 1
     assert len(solr.writes[0][0]["embedding"]) == 384
     assert job.errors[0].row == 2
+    assert manager.list_job_errors(job.id, offset=0, limit=1) == {
+        "items": [
+            {
+                "row": 2,
+                "document_id": "2",
+                "message": "Missing text for vector field 'embedding'.",
+            }
+        ],
+        "total": 1,
+        "offset": 0,
+        "limit": 1,
+    }
+    assert manager.list_job_errors(job.id, offset=1, limit=1)["items"] == []
     await manager.close()
 
 

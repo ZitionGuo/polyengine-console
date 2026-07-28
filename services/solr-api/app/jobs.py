@@ -88,6 +88,13 @@ class IngestError:
     document_id: str
     message: str
 
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "row": self.row,
+            "document_id": self.document_id,
+            "message": self.message,
+        }
+
 
 @dataclass
 class IngestJob:
@@ -313,6 +320,24 @@ class IngestManager:
         if job is None:
             raise HTTPException(status_code=404, detail={"message": "Ingest job was not found."})
         return job
+
+    def list_job_errors(
+        self,
+        job_id: str,
+        *,
+        offset: int,
+        limit: int,
+    ) -> dict[str, Any]:
+        job = self.get_job(job_id)
+        return {
+            "items": [
+                error.as_dict()
+                for error in job.errors[offset : offset + limit]
+            ],
+            "total": len(job.errors),
+            "offset": offset,
+            "limit": limit,
+        }
 
     def cancel_job(self, job_id: str) -> dict[str, Any]:
         job = self.get_job(job_id)

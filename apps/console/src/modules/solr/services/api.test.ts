@@ -170,4 +170,27 @@ describe("ingest jobs", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  it("loads a paginated ingest error page", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [{ row: 26, document_id: "doc-26", message: "Temporary failure." }],
+          total: 30,
+          offset: 25,
+          limit: 25,
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await api.jobErrors("job 1", 25, 25, controller.signal);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/solr/ingest/jobs/job%201/error-rows?offset=25&limit=25",
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
 });

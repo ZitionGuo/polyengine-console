@@ -229,6 +229,19 @@ export interface IngestJob {
   finished_at?: string | null;
 }
 
+export interface IngestErrorRow {
+  row: number;
+  document_id: string;
+  message: string;
+}
+
+export interface IngestErrorPage {
+  items: IngestErrorRow[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export class ApiError extends Error {
   status: number;
   detail: unknown;
@@ -318,6 +331,11 @@ export const api = {
   cancelJob: (id: string) => request<IngestJob>(`/api/ingest/jobs/${id}/cancel`, { method: "POST" }),
   retryJob: (id: string) =>
     request<IngestJob>(`/api/ingest/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+  jobErrors: (id: string, offset: number, limit: number, signal?: AbortSignal) =>
+    request<IngestErrorPage>(
+      `/api/ingest/jobs/${encodeURIComponent(id)}/error-rows?offset=${offset}&limit=${limit}`,
+      { signal },
+    ),
   jobErrorsUrl: (id: string) =>
     apiPath(`/ingest/jobs/${encodeURIComponent(id)}/errors`),
 };

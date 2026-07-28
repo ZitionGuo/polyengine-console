@@ -747,6 +747,11 @@ button, input, textarea { letter-spacing: 0; }
 .vector-target-builder .ant-form-item-explain-error { margin-bottom: 10px; }
 .job-vector-targets { width: fit-content; margin-top: 3px; }
 .job-retry-tag { width: fit-content; margin-top: 3px; }
+.ingest-error-drawer .ant-drawer-header { padding: 18px 22px; }
+.ingest-error-drawer .ant-drawer-body { padding: 18px 22px 28px; }
+.ingest-error-summary { margin-bottom: 18px; }
+.ingest-error-summary .ant-tag { margin: 0; }
+.ingest-error-message { overflow-wrap: anywhere; }
 
 .preview-panel, .jobs-panel { margin-top: 18px; }
 .job-progress { width: 100%; }
@@ -802,7 +807,8 @@ button, input, textarea { letter-spacing: 0; }
   .document-fields .ant-descriptions-item-label { width: 86px; }
   .document-object > div { grid-template-columns: 1fr; gap: 1px; }
   .query-inspector .ant-drawer-body,
-  .embedding-inspector .ant-drawer-body { padding: 16px; }
+  .embedding-inspector .ant-drawer-body,
+  .ingest-error-drawer .ant-drawer-body { padding: 16px; }
   .query-solr-request-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
   .query-solr-request dl > div { grid-template-columns: 1fr; gap: 1px; }
   .vector-target-heading { flex-direction: column; }

@@ -19,6 +19,7 @@ import type { ColumnsType } from "antd/es/table";
 import {
   Ban,
   Download,
+  FileWarning,
   FileUp,
   Plus,
   Play,
@@ -29,6 +30,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { AdaptiveSelect } from "../components/AdaptiveSelect";
+import { IngestErrorDrawer } from "../components/IngestErrorDrawer";
 import { PageHeader } from "../components/PageHeader";
 import { RetryFailedRowsButton } from "../components/RetryFailedRowsButton";
 import {
@@ -62,6 +64,7 @@ export const IngestPage = () => {
   const [file, setFile] = useState<File | null>(null);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [collection, setCollection] = useState(selectedCollection());
+  const [inspectedJobId, setInspectedJobId] = useState<string>();
   const idField = Form.useWatch("id_field", form);
   const collections = useQuery({ queryKey: ["solr", "collections"], queryFn: api.collections });
   const schema = useQuery({
@@ -116,6 +119,7 @@ export const IngestPage = () => {
     [collections.data],
   );
   const vectorFields = schema.data?.vector_fields.filter((field) => field.compatible) ?? [];
+  const inspectedJob = jobs.data?.jobs.find((job) => job.id === inspectedJobId);
 
   useEffect(() => {
     if (!collection && readyCollections.length) setCollection(readyCollections[0].name);
@@ -209,13 +213,23 @@ export const IngestPage = () => {
     {
       title: "Actions",
       key: "actions",
-      width: 176,
+      width: 208,
       render: (_, job) => (
         <Space>
           {job.status === "queued" || job.status === "running" ? (
             <Popconfirm title="Cancel this ingest job?" onConfirm={() => cancel.mutate(job.id)}>
               <Button type="text" danger icon={<Ban size={15} />} aria-label={`Cancel ${job.filename}`} />
             </Popconfirm>
+          ) : null}
+          {job.failed ? (
+            <Tooltip title="Inspect error rows">
+              <Button
+                type="text"
+                icon={<FileWarning size={15} />}
+                aria-label={`Inspect errors for ${job.filename}`}
+                onClick={() => setInspectedJobId(job.id)}
+              />
+            </Tooltip>
           ) : null}
           {job.failed ? (
             <Button
@@ -529,6 +543,13 @@ export const IngestPage = () => {
           scroll={{ x: 900 }}
         />
       </div>
+      <IngestErrorDrawer
+        job={inspectedJob}
+        open={Boolean(inspectedJobId)}
+        retrying={retry.isPending && retry.variables === inspectedJobId}
+        onRetry={(jobId) => retry.mutate(jobId)}
+        onClose={() => setInspectedJobId(undefined)}
+      />
     </section>
   );
 };

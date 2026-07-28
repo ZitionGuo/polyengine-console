@@ -1,7 +1,7 @@
 import csv
 import io
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ..jobs import IngestManager
@@ -50,6 +50,16 @@ async def cancel_job(job_id: str, manager: IngestManager = Depends(get_ingest_ma
 @router.post("/jobs/{job_id}/retry", status_code=202)
 async def retry_job(job_id: str, manager: IngestManager = Depends(get_ingest_manager)):
     return await manager.retry_job(job_id)
+
+
+@router.get("/jobs/{job_id}/error-rows")
+async def list_error_rows(
+    job_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    manager: IngestManager = Depends(get_ingest_manager),
+):
+    return manager.list_job_errors(job_id, offset=offset, limit=limit)
 
 
 @router.get("/jobs/{job_id}/errors")

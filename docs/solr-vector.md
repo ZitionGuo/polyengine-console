@@ -32,6 +32,8 @@ JSON, JSONL, and CSV uploads are staged locally and converted into background in
 
 Failures retain their original one-based source row numbers. `POST /api/ingest/jobs/{job_id}/retry` creates a linked job that revalidates the current Solr schema and processes only those failed rows with the original vector mappings. The source job remains unchanged for auditing.
 
+The Ingest page loads error details in bounded pages from `GET /api/ingest/jobs/{job_id}/error-rows`, including the source row, document ID, and normalized error message. The existing `GET /api/ingest/jobs/{job_id}/errors` endpoint remains available for a complete CSV export.
+
 Uploaded data and job state are ephemeral. A failed-row retry is available only while the staged upload remains inside the configured TTL; after it expires, upload the source file again. All staged data and job state are removed when the adapter shuts down.
 
 Credentials belong only in `services/solr-api/.env`:
