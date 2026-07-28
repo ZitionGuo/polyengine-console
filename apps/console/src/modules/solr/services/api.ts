@@ -7,7 +7,7 @@ export interface ModelStatus {
 
 export interface HealthResult {
   status: string;
-  solr: { version?: string; mode: string; admin_url: string };
+  solr: { version?: string; mode: string; endpoint: string; admin_url: string };
   model: ModelStatus;
 }
 

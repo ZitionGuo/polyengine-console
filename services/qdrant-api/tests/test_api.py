@@ -13,6 +13,7 @@ from app.qdrant import QdrantClient, QdrantHttpResponse, QdrantStream, get_qdran
 class RecordingQdrantClient:
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
+        self.endpoint = "http://qdrant.test:6333"
 
     async def request(self, method: str, path: str, **kwargs):
         self.calls.append({"method": method, "path": path, **kwargs})
@@ -49,6 +50,33 @@ def make_test_app(client: RecordingQdrantClient):
     app = create_app()
     app.dependency_overrides[get_qdrant_client] = lambda: client
     return app
+
+
+@pytest.mark.anyio
+async def test_health_returns_public_configured_endpoint():
+    fake = RecordingQdrantClient()
+    transport = httpx.ASGITransport(app=make_test_app(fake))
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "endpoint": "http://qdrant.test:6333",
+        "qdrant": {"ok": True, "path": "/"},
+    }
+
+
+def test_qdrant_endpoint_redacts_url_userinfo():
+    client = QdrantClient(
+        Settings(
+            _env_file=None,
+            qdrant_url="https://operator:secret@qdrant.example:7443/vector/",
+        )
+    )
+
+    assert client.endpoint == "https://qdrant.example:7443/vector"
 
 
 @pytest.mark.anyio

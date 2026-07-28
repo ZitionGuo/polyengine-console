@@ -26,6 +26,7 @@ async def health(
         "solr": {
             "version": lucene.get("solr-spec-version") or lucene.get("solr-impl-version"),
             "mode": mode,
+            "endpoint": solr.endpoint,
             "admin_url": solr.admin_url,
         },
         "model": embeddings.status(),

@@ -9,5 +9,6 @@ router = APIRouter(tags=["health"])
 async def health(client: QdrantClient = Depends(get_qdrant_client)):
     return {
         "status": "ok",
+        "endpoint": client.endpoint,
         "qdrant": await client.request("GET", "/"),
     }

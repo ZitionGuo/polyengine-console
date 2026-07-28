@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from fastapi import HTTPException, Request
@@ -48,6 +48,15 @@ class QdrantClient:
         self._transport = transport
         self._request_client: httpx.AsyncClient | None = None
         self._stream_client: httpx.AsyncClient | None = None
+
+    @property
+    def endpoint(self) -> str:
+        parts = urlsplit(self._base_url)
+        host = parts.hostname or ""
+        if ":" in host:
+            host = f"[{host}]"
+        netloc = f"{host}:{parts.port}" if parts.port else host
+        return urlunsplit((parts.scheme, netloc, parts.path.rstrip("/"), "", ""))
 
     def _headers(self) -> dict[str, str]:
         return {"api-key": self._api_key} if self._api_key else {}

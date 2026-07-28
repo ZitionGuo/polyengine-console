@@ -7,6 +7,12 @@ export interface QdrantEnvelope<T = unknown> {
   [key: string]: unknown;
 }
 
+export interface HealthResult {
+  status: string;
+  endpoint: string;
+  qdrant: unknown;
+}
+
 export interface CollectionSummary {
   name: string;
 }
@@ -262,7 +268,7 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
 };
 
 export const api = {
-  health: () => request<{ status: string; qdrant: unknown }>("/api/health"),
+  health: () => request<HealthResult>("/api/health"),
 
   listCollections: () =>
     request<QdrantEnvelope<{ collections: CollectionSummary[] }>>("/api/collections"),

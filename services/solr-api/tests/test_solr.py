@@ -7,6 +7,18 @@ from app.config import Settings
 from app.solr import SolrClient
 
 
+def test_public_urls_redact_configured_userinfo():
+    client = SolrClient(
+        Settings(
+            _env_file=None,
+            solr_url="https://operator:secret@search.example:9443/solr/",
+        )
+    )
+
+    assert client.endpoint == "https://search.example:9443/solr"
+    assert client.admin_url == "https://search.example:9443/solr/#/"
+
+
 @pytest.mark.anyio
 async def test_schema_discovers_dense_and_text_fields():
     def handler(request: httpx.Request) -> httpx.Response:

@@ -45,6 +45,17 @@ const clusterMode = (value: QdrantEnvelope<Record<string, unknown>> | undefined)
 const queryError = (value: unknown) =>
   value instanceof Error ? value.message : "The engine did not respond.";
 
+const endpointLabel = (value: string | undefined, fallback: string) => {
+  if (!value) return fallback;
+  try {
+    const parsed = new URL(value);
+    const path = parsed.pathname.replace(/\/$/, "");
+    return `${parsed.host}${path === "/" ? "" : path}`;
+  } catch {
+    return value;
+  }
+};
+
 const StatusPill = ({ tone }: { tone: StatusTone }) => (
   <Tag
     className={`engine-status engine-status-${tone}`}
@@ -174,8 +185,8 @@ export const OverviewPage = ({ onNavigate }: OverviewPageProps) => {
           )}
 
           <div className="engine-card-footer">
-            <Tooltip title="Qdrant REST endpoint">
-              <code>localhost:6333</code>
+            <Tooltip title={qdrantHealth.data?.endpoint ?? "Qdrant REST endpoint"}>
+              <code>{endpointLabel(qdrantHealth.data?.endpoint, "localhost:6333")}</code>
             </Tooltip>
             <Space>
               <Button
@@ -240,8 +251,8 @@ export const OverviewPage = ({ onNavigate }: OverviewPageProps) => {
           )}
 
           <div className="engine-card-footer">
-            <Tooltip title="Solr REST endpoint">
-              <code>localhost:8983</code>
+            <Tooltip title={solrHealth.data?.solr.endpoint ?? "Solr REST endpoint"}>
+              <code>{endpointLabel(solrHealth.data?.solr.endpoint, "localhost:8983")}</code>
             </Tooltip>
             <Space>
               {solrHealth.isSuccess && model?.status !== "ready" ? (

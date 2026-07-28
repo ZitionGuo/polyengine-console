@@ -3,7 +3,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from time import monotonic, perf_counter
 from typing import Any, Awaitable, Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 from fastapi import HTTPException, Request
@@ -40,8 +40,17 @@ class SolrClient:
         self._metadata_cache_locks: dict[str, asyncio.Lock] = {}
 
     @property
+    def endpoint(self) -> str:
+        parts = urlsplit(self.base_url)
+        host = parts.hostname or ""
+        if ":" in host:
+            host = f"[{host}]"
+        netloc = f"{host}:{parts.port}" if parts.port else host
+        return urlunsplit((parts.scheme, netloc, parts.path.rstrip("/"), "", ""))
+
+    @property
     def admin_url(self) -> str:
-        base = self.base_url
+        base = self.endpoint
         return f"{base}/#/" if base.endswith("/solr") else f"{base.rsplit('/solr', 1)[0]}/solr/#/"
 
     def _get_client(self) -> httpx.AsyncClient:
