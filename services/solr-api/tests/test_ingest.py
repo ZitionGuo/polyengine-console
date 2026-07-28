@@ -48,6 +48,28 @@ class FakeSolr:
         return {"responseHeader": {"status": 0}}
 
 
+class TransientRowFailureSolr(FakeSolr):
+    def __init__(self):
+        super().__init__()
+        self.failed_once = False
+
+    async def request(self, method, path, **kwargs):
+        documents = kwargs["json"]
+        if documents[0]["id"] == "2" and not self.failed_once:
+            self.failed_once = True
+            raise RuntimeError("Temporary Solr update failure.")
+        return await super().request(method, path, **kwargs)
+
+
+async def wait_for_job(manager: IngestManager, job_id: str):
+    for _ in range(100):
+        job = manager.get_job(job_id)
+        if job.status in {"completed", "failed", "cancelled"}:
+            return job
+        await asyncio.sleep(0.01)
+    raise AssertionError("Ingest job did not finish.")
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     ("filename", "content", "expected_format"),
@@ -97,11 +119,7 @@ async def test_ingest_job_tracks_success_and_row_errors(tmp_path):
             batch_size=2,
         )
     )
-    for _ in range(100):
-        job = manager.get_job(created["id"])
-        if job.status in {"completed", "failed", "cancelled"}:
-            break
-        await asyncio.sleep(0.01)
+    job = await wait_for_job(manager, created["id"])
 
     assert job.status == "completed"
     assert job.processed == 2
@@ -144,11 +162,7 @@ async def test_ingest_job_writes_multiple_vector_targets_in_one_update(tmp_path)
             batch_size=2,
         )
     )
-    for _ in range(100):
-        job = manager.get_job(created["id"])
-        if job.status in {"completed", "failed", "cancelled"}:
-            break
-        await asyncio.sleep(0.01)
+    job = await wait_for_job(manager, created["id"])
 
     assert job.status == "completed"
     assert created["vector_targets"] == [
@@ -163,6 +177,60 @@ async def test_ingest_job_writes_multiple_vector_targets_in_one_update(tmp_path)
     document = solr.writes[0][0]
     assert len(document["embedding"]) == 384
     assert len(document["embedding_title"]) == 384
+    await manager.close()
+
+
+@pytest.mark.anyio
+async def test_retry_job_processes_only_failed_source_rows(tmp_path):
+    solr = TransientRowFailureSolr()
+    manager = IngestManager(
+        Settings(_env_file=None, ingest_batch_size=1),
+        solr,
+        FakeEmbeddings(),
+        temp_root=tmp_path,
+    )
+    upload = await manager.save_upload(
+        UploadFile(
+            filename="docs.jsonl",
+            file=BytesIO(
+                b'{"id":"1","title":"One"}\n'
+                b'{"id":"2","title":"Two"}\n'
+                b'{"id":"3","title":"Three"}\n'
+            ),
+        ),
+        "auto",
+    )
+    created = await manager.create_job(
+        IngestJobCreateRequest(
+            upload_id=upload["upload_id"],
+            collection="docs",
+            id_field="id",
+            vector_field="embedding",
+            text_fields=["title"],
+            batch_size=1,
+        )
+    )
+    source = await wait_for_job(manager, created["id"])
+
+    assert source.status == "completed"
+    assert source.succeeded == 2
+    assert source.failed == 1
+    assert source.failed_rows == {2}
+    assert source.as_dict()["retryable_rows"] == 1
+
+    retried = await manager.retry_job(source.id)
+    retry = await wait_for_job(manager, retried["id"])
+
+    assert retried["retry_of"] == source.id
+    assert retried["total"] == 1
+    assert retry.status == "completed"
+    assert retry.succeeded == 1
+    assert retry.failed == 0
+    assert [
+        document["id"]
+        for write in solr.writes
+        for document in write
+    ] == ["1", "3", "2"]
     await manager.close()
 
 

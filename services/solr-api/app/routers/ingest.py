@@ -47,6 +47,11 @@ async def cancel_job(job_id: str, manager: IngestManager = Depends(get_ingest_ma
     return manager.cancel_job(job_id)
 
 
+@router.post("/jobs/{job_id}/retry", status_code=202)
+async def retry_job(job_id: str, manager: IngestManager = Depends(get_ingest_manager)):
+    return await manager.retry_job(job_id)
+
+
 @router.get("/jobs/{job_id}/errors")
 async def download_errors(job_id: str, manager: IngestManager = Depends(get_ingest_manager)):
     job = manager.get_job(job_id)

@@ -720,6 +720,7 @@ button, input, textarea { letter-spacing: 0; }
 .vector-target-remove { margin-top: 30px; }
 .vector-target-builder .ant-form-item-explain-error { margin-bottom: 10px; }
 .job-vector-targets { width: fit-content; margin-top: 3px; }
+.job-retry-tag { width: fit-content; margin-top: 3px; }
 
 .preview-panel, .jobs-panel { margin-top: 18px; }
 .job-progress { width: 100%; }

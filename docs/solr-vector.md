@@ -24,7 +24,9 @@ The default model is `sentence-transformers/all-MiniLM-L6-v2`. The model is down
 
 JSON, JSONL, and CSV uploads are staged locally and converted into background ingestion jobs. A job can map one or more Solr vector fields to different source-text field sets; all generated vectors are written in the same Solr update. The legacy single `vector_field` plus `text_fields` request shape remains accepted.
 
-Uploaded data and job state are ephemeral and expire after the configured TTL or when the adapter shuts down.
+Failures retain their original one-based source row numbers. `POST /api/ingest/jobs/{job_id}/retry` creates a linked job that revalidates the current Solr schema and processes only those failed rows with the original vector mappings. The source job remains unchanged for auditing.
+
+Uploaded data and job state are ephemeral. A failed-row retry is available only while the staged upload remains inside the configured TTL; after it expires, upload the source file again. All staged data and job state are removed when the adapter shuts down.
 
 Credentials belong only in `services/solr-api/.env`:
 

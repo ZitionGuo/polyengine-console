@@ -197,6 +197,8 @@ export interface IngestJob {
   collection: string;
   filename: string;
   vector_targets: IngestVectorTarget[];
+  retry_of?: string | null;
+  retryable_rows: number;
   status: "queued" | "running" | "completed" | "cancelled" | "failed";
   total: number;
   processed: number;
@@ -289,6 +291,8 @@ export const api = {
     request<IngestJob>("/api/ingest/jobs", { method: "POST", body: JSON.stringify(payload) }),
   jobs: () => request<{ jobs: IngestJob[] }>("/api/ingest/jobs"),
   cancelJob: (id: string) => request<IngestJob>(`/api/ingest/jobs/${id}/cancel`, { method: "POST" }),
+  retryJob: (id: string) =>
+    request<IngestJob>(`/api/ingest/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }),
   jobErrorsUrl: (id: string) =>
     apiPath(`/ingest/jobs/${encodeURIComponent(id)}/errors`),
 };

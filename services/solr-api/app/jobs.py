@@ -94,12 +94,15 @@ class IngestJob:
     id: str
     config: IngestJobCreateRequest
     filename: str
+    source_rows: tuple[int, ...] | None = None
+    retry_of: str | None = None
     status: str = "queued"
     total: int = 0
     processed: int = 0
     succeeded: int = 0
     failed: int = 0
     errors: list[IngestError] = field(default_factory=list)
+    failed_rows: set[int] = field(default_factory=set)
     cancel_requested: bool = False
     created_at: datetime = field(default_factory=_now)
     started_at: datetime | None = None
@@ -118,6 +121,10 @@ class IngestJob:
                 target.model_dump()
                 for target in self.config.vector_targets
             ],
+            "retry_of": self.retry_of,
+            "retryable_rows": len(self.failed_rows) or (
+                self.failed if self.status in {"completed", "failed", "cancelled"} else 0
+            ),
             "status": self.status,
             "total": self.total,
             "processed": self.processed,
@@ -208,6 +215,41 @@ class IngestManager:
         upload = self.uploads.get(config.upload_id)
         if upload is None:
             raise HTTPException(status_code=404, detail={"message": "Upload was not found or has expired."})
+        await self._validate_job(config, upload)
+        return self._enqueue_job(config, upload)
+
+    async def retry_job(self, job_id: str) -> dict[str, Any]:
+        await self.cleanup_expired()
+        source = self.get_job(job_id)
+        if source.status in {"queued", "running"}:
+            raise HTTPException(status_code=409, detail={"message": "Wait for the ingest job to finish before retrying."})
+        if not source.failed:
+            raise HTTPException(status_code=409, detail={"message": "This ingest job has no failed rows to retry."})
+        upload = self.uploads.get(source.config.upload_id)
+        if upload is None:
+            raise HTTPException(
+                status_code=410,
+                detail={"message": "The source upload has expired. Upload the file again to retry."},
+            )
+        retry_rows = tuple(
+            sorted(
+                source.failed_rows
+                or set(source.source_rows or range(1, upload.total + 1))
+            )
+        )
+        await self._validate_job(source.config, upload)
+        return self._enqueue_job(
+            source.config.model_copy(deep=True),
+            upload,
+            source_rows=retry_rows,
+            retry_of=source.id,
+        )
+
+    async def _validate_job(
+        self,
+        config: IngestJobCreateRequest,
+        upload: UploadRecord,
+    ) -> None:
         text_fields = list(
             dict.fromkeys(
                 field_name
@@ -241,7 +283,22 @@ class IngestManager:
         if config.id_field not in schema_names:
             raise HTTPException(status_code=422, detail={"message": "The selected ID field is not in the Solr schema."})
 
-        job = IngestJob(id=uuid4().hex, config=config, filename=upload.filename, total=upload.total)
+    def _enqueue_job(
+        self,
+        config: IngestJobCreateRequest,
+        upload: UploadRecord,
+        *,
+        source_rows: tuple[int, ...] | None = None,
+        retry_of: str | None = None,
+    ) -> dict[str, Any]:
+        job = IngestJob(
+            id=uuid4().hex,
+            config=config,
+            filename=upload.filename,
+            source_rows=source_rows,
+            retry_of=retry_of,
+            total=len(source_rows) if source_rows is not None else upload.total,
+        )
         self.jobs[job.id] = job
         task = asyncio.create_task(self._run_job(job, upload), name=f"solr-ingest-{job.id}")
         self._tasks[job.id] = task
@@ -287,33 +344,53 @@ class IngestManager:
                 return
             job.status = "running"
             job.started_at = _now()
+            indexed_records: list[tuple[int, dict[str, Any]]] = []
             try:
                 records = await asyncio.to_thread(_parse_records, upload.path, upload.file_format)
-                job.total = len(records)
-                for start in range(0, len(records), job.config.batch_size):
+                indexed_records = list(enumerate(records, start=1))
+                if job.source_rows is not None:
+                    selected_rows = set(job.source_rows)
+                    indexed_records = [
+                        item
+                        for item in indexed_records
+                        if item[0] in selected_rows
+                    ]
+                job.total = len(indexed_records)
+                for start in range(0, len(indexed_records), job.config.batch_size):
                     if job.cancel_requested:
                         job.status = "cancelled"
                         break
-                    await self._process_batch(job, records[start : start + job.config.batch_size], start)
+                    await self._process_batch(
+                        job,
+                        indexed_records[start : start + job.config.batch_size],
+                    )
                 if job.status != "cancelled":
                     job.status = "failed" if job.succeeded == 0 and job.failed else "completed"
             except Exception as exc:  # noqa: BLE001 - keep the job inspectable
                 job.status = "failed"
-                job.errors.append(IngestError(row=0, document_id="", message=_error_message(exc)))
-                job.failed = max(job.failed, job.total - job.processed)
-                job.processed = job.total
+                message = _error_message(exc)
+                remaining = indexed_records[job.processed :]
+                if remaining:
+                    for row, record in remaining:
+                        document_id = str(record.get(job.config.id_field, "")).strip()
+                        job.errors.append(IngestError(row=row, document_id=document_id, message=message))
+                        job.failed_rows.add(row)
+                    job.failed += len(remaining)
+                    job.processed += len(remaining)
+                else:
+                    job.errors.append(IngestError(row=0, document_id="", message=message))
+                    job.failed = max(job.failed, job.total - job.processed)
+                    job.processed = job.total
             finally:
                 job.finished_at = _now()
 
     async def _process_batch(
         self,
         job: IngestJob,
-        records: list[dict[str, Any]],
-        start_index: int,
+        records: list[tuple[int, dict[str, Any]]],
     ) -> None:
         valid: list[tuple[int, dict[str, Any], str, dict[str, str]]] = []
-        for offset, record in enumerate(records):
-            row = start_index + offset + 1
+        for row, record in records:
             document_id = str(record.get(job.config.id_field, "")).strip()
             target_texts = {
                 target.vector_field: "\n\n".join(
@@ -338,6 +415,7 @@ class IngestManager:
                     else f"text for vector field '{missing_target}'"
                 )
                 job.errors.append(IngestError(row=row, document_id=document_id, message=f"Missing {missing}."))
+                job.failed_rows.add(row)
                 job.failed += 1
                 job.processed += 1
                 continue
@@ -381,6 +459,7 @@ class IngestManager:
             message = _error_message(exc)
             for row, _, document_id, _ in valid:
                 job.errors.append(IngestError(row=row, document_id=document_id, message=message))
+                job.failed_rows.add(row)
             job.failed += len(valid)
         finally:
             job.processed += len(valid)

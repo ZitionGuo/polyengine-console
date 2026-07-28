@@ -108,4 +108,34 @@ describe("ingest jobs", () => {
       }),
     );
   });
+
+  it("starts a failed-row retry using the encoded job id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "retry-1",
+          collection: "docs",
+          filename: "documents.jsonl",
+          vector_targets: [{ vector_field: "embedding", text_fields: ["title"] }],
+          retry_of: "job 1",
+          retryable_rows: 0,
+          status: "queued",
+          total: 1,
+          processed: 0,
+          succeeded: 0,
+          failed: 0,
+          created_at: "2026-07-28T00:00:00Z",
+        }),
+        { status: 202 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.retryJob("job 1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/solr/ingest/jobs/job%201/retry",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
 });

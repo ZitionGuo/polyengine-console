@@ -30,6 +30,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AdaptiveSelect } from "../components/AdaptiveSelect";
 import { PageHeader } from "../components/PageHeader";
+import { RetryFailedRowsButton } from "../components/RetryFailedRowsButton";
 import {
   api,
   errorMessage,
@@ -105,6 +106,10 @@ export const IngestPage = () => {
     mutationFn: api.cancelJob,
     onSuccess: () => void cache.invalidateQueries({ queryKey: ["solr", "ingest-jobs"] }),
   });
+  const retry = useMutation({
+    mutationFn: api.retryJob,
+    onSuccess: () => void cache.invalidateQueries({ queryKey: ["solr", "ingest-jobs"] }),
+  });
 
   const readyCollections = useMemo(
     () => (collections.data?.collections ?? []).filter((item) => item.ready),
@@ -154,6 +159,11 @@ export const IngestPage = () => {
         <Space direction="vertical" size={0}>
           <Typography.Text strong>{value}</Typography.Text>
           <Typography.Text type="secondary">{row.collection}</Typography.Text>
+          {row.retry_of ? (
+            <Tooltip title={`Retry of job ${row.retry_of}`}>
+              <Tag className="job-retry-tag" color="blue">Retry</Tag>
+            </Tooltip>
+          ) : null}
           <Tooltip
             title={row.vector_targets
               .map((target) => `${target.vector_field} <- ${target.text_fields.join(" + ")}`)
@@ -199,7 +209,7 @@ export const IngestPage = () => {
     {
       title: "Actions",
       key: "actions",
-      width: 150,
+      width: 176,
       render: (_, job) => (
         <Space>
           {job.status === "queued" || job.status === "running" ? (
@@ -215,6 +225,11 @@ export const IngestPage = () => {
               aria-label={`Download errors for ${job.filename}`}
             />
           ) : null}
+          <RetryFailedRowsButton
+            job={job}
+            loading={retry.isPending && retry.variables === job.id}
+            onRetry={(jobId) => retry.mutate(jobId)}
+          />
         </Space>
       ),
     },
@@ -496,6 +511,14 @@ export const IngestPage = () => {
             <Typography.Text type="secondary">Only one embedding job runs at a time on this local worker</Typography.Text>
           </div>
         </div>
+        {retry.isError ? (
+          <Alert
+            type="error"
+            showIcon
+            message="Unable to retry failed rows"
+            description={errorMessage(retry.error)}
+          />
+        ) : null}
         <Table
           rowKey="id"
           columns={jobColumns}
