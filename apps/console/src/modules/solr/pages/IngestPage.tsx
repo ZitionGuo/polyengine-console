@@ -33,6 +33,7 @@ import { AdaptiveSelect } from "../components/AdaptiveSelect";
 import { IngestErrorDrawer } from "../components/IngestErrorDrawer";
 import { PageHeader } from "../components/PageHeader";
 import { RetryFailedRowsButton } from "../components/RetryFailedRowsButton";
+import { SchemaRefreshButton } from "../components/SchemaRefreshButton";
 import {
   api,
   errorMessage,
@@ -303,6 +304,7 @@ export const IngestPage = () => {
               <Typography.Title level={3}>2. Field mapping</Typography.Title>
               <Typography.Text type="secondary">The target schema is never modified</Typography.Text>
             </div>
+            <SchemaRefreshButton collection={collection} />
           </div>
           <Form<JobForm>
             form={form}

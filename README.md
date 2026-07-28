@@ -261,7 +261,7 @@ The first load may download model files. Later loads use the local cache.
 
 ### A Solr vector field is incompatible
 
-The field must be a `DenseVectorField` using `FLOAT32`, and its dimension must match `EMBEDDING_DIMENSION`. The default model requires 384 dimensions.
+The field must be a `DenseVectorField` using `FLOAT32`, and its dimension must match `EMBEDDING_DIMENSION`. The default model requires 384 dimensions. After changing a schema in Solr Admin, use **Refresh** on Collections or the schema refresh icon in Vector Search/Ingest to bypass the adapter metadata TTL immediately.
 
 ### A moved virtual environment no longer starts scripts
 

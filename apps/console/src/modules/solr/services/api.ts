@@ -311,8 +311,13 @@ export const api = {
       signal,
     }),
   collections: () => request<CollectionsResult>("/api/collections"),
+  refreshCollections: () => request<CollectionsResult>("/api/collections?refresh=true"),
   schema: (collection: string) =>
     request<CollectionSchema>(`/api/collections/${encodeURIComponent(collection)}/schema`),
+  refreshSchema: (collection: string) =>
+    request<CollectionSchema>(
+      `/api/collections/${encodeURIComponent(collection)}/schema?refresh=true`,
+    ),
   search: (payload: SearchPayload, signal?: AbortSignal) =>
     request<SearchResult>("/api/search", { method: "POST", body: JSON.stringify(payload), signal }),
   compareSearch: (payload: CompareSearchPayload, signal?: AbortSignal) =>

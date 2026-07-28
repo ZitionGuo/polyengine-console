@@ -26,6 +26,12 @@ In the browser, the full vector is held only in the current TanStack Query memor
 - Fuse mode combines selected vector fields with per-field weights and score thresholds.
 - `timeout_ms` is forwarded to Solr as `timeAllowed`; the adapter adds a small network grace period and returns HTTP 504 for timeouts.
 
+## Metadata refresh
+
+Collection names and schemas use an in-memory TTL controlled by `SOLR_METADATA_CACHE_TTL_SECONDS`. Ordinary navigation and query refetches reuse that cache.
+
+The Collections **Refresh** action calls `GET /api/collections?refresh=true` and clears all cached Solr metadata before loading. The refresh icon beside vector-field controls calls `GET /api/collections/{collection}/schema?refresh=true`, invalidating only that collection and the collection-name cache. Valid vector, lexical, and return-field selections are retained after refresh; removed or newly incompatible fields fall back to available values.
+
 ## Ingestion
 
 JSON, JSONL, and CSV uploads are staged locally and converted into background ingestion jobs. A job can map one or more Solr vector fields to different source-text field sets; all generated vectors are written in the same Solr update. The legacy single `vector_field` plus `text_fields` request shape remains accepted.

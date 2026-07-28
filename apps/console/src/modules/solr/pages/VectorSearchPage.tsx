@@ -49,6 +49,7 @@ import { EmbeddingInspector } from "../components/EmbeddingInspector";
 import { PageHeader } from "../components/PageHeader";
 import { QueryInspector } from "../components/QueryInspector";
 import { RelevanceButtons } from "../components/RelevanceButtons";
+import { SchemaRefreshButton } from "../components/SchemaRefreshButton";
 import { ScoreAnalysisDrawer } from "../components/ScoreAnalysisDrawer";
 import {
   api,
@@ -100,6 +101,7 @@ import {
 } from "../services/searchExport";
 import { buildScoreProfiles } from "../services/scoreProfile";
 import { scoreSemantics, supportsSimilarityAnalysis } from "../services/scoreSemantics";
+import { retainAvailableValues } from "../services/schemaSelections";
 import {
   buildSearchPayload,
   clearSearchHistory,
@@ -423,14 +425,29 @@ export const VectorSearchPage = () => {
       .filter((field) => !field.name.startsWith("_") && field.class?.includes("TextField"))
       .slice(0, 2)
       .map((field) => field.name);
+    const selectedText = retainAvailableValues(
+      form.getFieldValue("lexical_fields"),
+      schema.data.text_fields.map((field) => field.name),
+      preferredText,
+      true,
+    );
+    const storedFields = schema.data.fields
+      .filter((field) => field.stored)
+      .map((field) => field.name);
+    const selectedReturnFields = retainAvailableValues(
+      form.getFieldValue("return_fields"),
+      storedFields,
+      storedFields.slice(0, 8),
+      false,
+    );
     setLexicalBoosts((current) => Object.fromEntries(
-      preferredText.map((field) => [field, current[field] ?? 1]),
+      selectedText.map((field) => [field, current[field] ?? 1]),
     ));
     form.setFieldsValue({
       collection,
       vector_field: firstVector,
-      lexical_fields: preferredText,
-      return_fields: schema.data.fields.filter((field) => field.stored).slice(0, 8).map((field) => field.name),
+      lexical_fields: selectedText,
+      return_fields: selectedReturnFields,
     });
   }, [collection, form, schema.data]);
 
@@ -930,7 +947,19 @@ export const VectorSearchPage = () => {
                 />
               </Form.Item>
               {targetMode === "single" ? (
-                <Form.Item name="vector_field" label="Vector field" rules={[{ required: true }]}>
+                <Form.Item
+                  name="vector_field"
+                  label={(
+                    <Space size={4}>
+                      <span>Vector field</span>
+                      <SchemaRefreshButton
+                        collection={collection}
+                        onRefreshed={resetResults}
+                      />
+                    </Space>
+                  )}
+                  rules={[{ required: true }]}
+                >
                   <AdaptiveSelect
                     loading={schema.isLoading}
                     options={vectorFields.map((field) => ({
@@ -944,7 +973,15 @@ export const VectorSearchPage = () => {
                 </Form.Item>
               ) : (
                 <Form.Item
-                  label="Vector fields"
+                  label={(
+                    <Space size={4}>
+                      <span>Vector fields</span>
+                      <SchemaRefreshButton
+                        collection={collection}
+                        onRefreshed={resetResults}
+                      />
+                    </Space>
+                  )}
                   validateStatus={compareFields.length < 2 ? "error" : undefined}
                   help={compareFields.length < 2 ? "Select at least two fields." : undefined}
                 >

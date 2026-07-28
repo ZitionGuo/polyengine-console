@@ -46,9 +46,12 @@ async def _summary(name: str, solr: SolrClient, dimension: int) -> dict[str, Any
 
 @router.get("")
 async def list_collections(
+    refresh: bool = False,
     solr: SolrClient = Depends(get_solr_client),
     embeddings: EmbeddingService = Depends(get_embedding_service),
 ):
+    if refresh:
+        solr.invalidate_metadata_cache()
     names = await solr.list_collection_names()
     semaphore = asyncio.Semaphore(6)
 
@@ -65,9 +68,12 @@ async def list_collections(
 @router.get("/{collection_name}/schema")
 async def collection_schema(
     collection_name: str,
+    refresh: bool = False,
     solr: SolrClient = Depends(get_solr_client),
     embeddings: EmbeddingService = Depends(get_embedding_service),
 ):
+    if refresh:
+        solr.invalidate_metadata_cache(collection_name)
     names = await solr.list_collection_names()
     if collection_name not in names:
         raise HTTPException(status_code=404, detail={"message": "Collection was not found."})

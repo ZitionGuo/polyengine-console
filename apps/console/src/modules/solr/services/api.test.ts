@@ -98,6 +98,41 @@ describe("embedding preview", () => {
   });
 });
 
+describe("metadata refresh", () => {
+  it("bypasses collection and schema caches explicitly", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ collections: [], model_dimension: 384 }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            collection: "docs",
+            fields: [],
+            vector_fields: [],
+            text_fields: [],
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.refreshCollections();
+    await api.refreshSchema("docs/2026");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/solr/collections?refresh=true",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/solr/collections/docs%2F2026/schema?refresh=true",
+      expect.any(Object),
+    );
+  });
+});
+
 describe("ingest jobs", () => {
   it("sends independent source mappings for every vector target", async () => {
     const ingestPayload: IngestJobPayload = {

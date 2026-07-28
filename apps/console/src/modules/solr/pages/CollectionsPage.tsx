@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Empty, Space, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { ArrowRight, RefreshCw } from "lucide-react";
@@ -13,7 +13,15 @@ const openPage = (collection: string, page: PageKey) => {
 };
 
 export const CollectionsPage = () => {
+  const cache = useQueryClient();
   const collections = useQuery({ queryKey: ["solr", "collections"], queryFn: api.collections });
+  const refresh = useMutation({
+    mutationFn: api.refreshCollections,
+    onSuccess: (data) => {
+      cache.setQueryData(["solr", "collections"], data);
+      void cache.invalidateQueries({ queryKey: ["solr", "schema"] });
+    },
+  });
 
   const columns: ColumnsType<CollectionSummary> = [
     {
@@ -91,13 +99,22 @@ export const CollectionsPage = () => {
         title="Collections"
         description={`Vector readiness is checked against the configured ${collections.data?.model_dimension ?? 384}-dimension model.`}
         actions={
-          <Button icon={<RefreshCw size={16} />} loading={collections.isFetching} onClick={() => collections.refetch()}>
+          <Button
+            icon={<RefreshCw size={16} />}
+            loading={collections.isFetching || refresh.isPending}
+            onClick={() => refresh.mutate()}
+          >
             Refresh
           </Button>
         }
       />
-      {collections.isError ? (
-        <Alert type="error" showIcon message="Unable to load collections" description={errorMessage(collections.error)} />
+      {collections.isError || refresh.isError ? (
+        <Alert
+          type="error"
+          showIcon
+          message="Unable to load collections"
+          description={errorMessage(refresh.error ?? collections.error)}
+        />
       ) : null}
       <div className="surface table-surface">
         <Table
