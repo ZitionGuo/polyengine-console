@@ -16,7 +16,7 @@ Operate Qdrant, explore Solr and Elasticsearch vector relevance, and keep each e
 
 </div>
 
-![PolyEngine Console overview with Qdrant and Solr connected](docs/images/overview.png)
+![PolyEngine Console overview with Qdrant, Solr, and Elasticsearch connected](docs/images/overview.png)
 
 PolyEngine Console is a modular administration workspace for local search infrastructure. The default screen is an engine health overview rather than an engine-specific page. Qdrant, Solr, and Elasticsearch keep separate routes, query caches, health checks, and FastAPI processes, so one unavailable engine never blocks the others.
 
