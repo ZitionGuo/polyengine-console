@@ -25,7 +25,7 @@ PolyEngine Console is a modular administration workspace for local search infras
 | --- | --- |
 | **Unified workspace** | Engine overview, grouped navigation, live health indicators, responsive desktop/mobile shell, and isolated failure states. |
 | **Qdrant operations** | Collections, dense/named/sparse vectors, payload indexes, points, aliases, snapshots, optimization activity, cluster telemetry, and a guarded REST console. |
-| **Solr vector search** | Plain-English query embeddings, semantic and hybrid retrieval, explicit topK, multi-vector comparison and fusion, query-vector inspection, diagnostics, and relevance inspection. |
+| **Solr vector search** | Plain-English query embeddings, semantic and hybrid retrieval, explicit topK, multi-vector comparison and fusion, query-vector/cache inspection, diagnostics, and relevance inspection. |
 | **Solr ingestion** | JSON, JSONL, and CSV uploads; independent source-text mappings for every vector field; batched embeddings; progress, cancellation, paginated error inspection, failed-row retries, and CSV exports. |
 | **Local-first security** | API keys and credentials stay in backend-only `.env` files. The browser communicates only with namespaced local adapters. |
 | **Extensible foundation** | An engine registry and namespaced module layout are ready for future Elasticsearch and Dgraph adapters. |
@@ -258,6 +258,8 @@ curl -X POST http://localhost:5173/api/solr/model/load
 ```
 
 The first load may download model files. Later loads use the local cache.
+
+The Overview and Query Embedding inspector show the bounded in-memory query cache. **Clear cache** removes cached query vectors without unloading the model or deleting the Hugging Face model files.
 
 ### A Solr vector field is incompatible
 

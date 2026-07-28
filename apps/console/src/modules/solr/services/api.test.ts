@@ -96,6 +96,31 @@ describe("embedding preview", () => {
       }),
     );
   });
+
+  it("clears the backend query cache with a mutating request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          cleared: 4,
+          model: {
+            name: "model",
+            dimension: 384,
+            status: "ready",
+            query_cache: { entries: 0, capacity: 512, ttl_seconds: 900 },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.clearEmbeddingCache();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/solr/model/cache",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
 });
 
 describe("metadata refresh", () => {

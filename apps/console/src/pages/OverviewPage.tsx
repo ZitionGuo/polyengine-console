@@ -19,6 +19,7 @@ import {
   api as solrApi,
   errorMessage,
 } from "../modules/solr/services/api";
+import { EmbeddingCacheClearButton } from "../modules/solr/components/EmbeddingCacheClearButton";
 
 interface OverviewPageProps {
   onNavigate: (page: AppPage) => void;
@@ -242,10 +243,16 @@ export const OverviewPage = ({ onNavigate }: OverviewPageProps) => {
               </div>
               <div>
                 <span>Embedding model</span>
-                <strong className="metric-with-icon">
-                  <BrainCircuit size={15} />
-                  {model?.status === "ready" ? "Ready" : model?.status === "loading" ? "Loading" : "Not loaded"}
-                </strong>
+                <Tooltip
+                  title={model?.query_cache
+                    ? `${model.name} · ${model.query_cache.entries}/${model.query_cache.capacity} cached queries`
+                    : model?.name}
+                >
+                  <strong className="metric-with-icon">
+                    <BrainCircuit size={15} />
+                    {model?.status === "ready" ? "Ready" : model?.status === "loading" ? "Loading" : "Not loaded"}
+                  </strong>
+                </Tooltip>
               </div>
             </div>
           )}
@@ -263,6 +270,12 @@ export const OverviewPage = ({ onNavigate }: OverviewPageProps) => {
                 >
                   Load model
                 </Button>
+              ) : null}
+              {model?.status === "ready" && (model.query_cache?.entries ?? 0) > 0 ? (
+                <EmbeddingCacheClearButton
+                  entries={model.query_cache?.entries}
+                  showLabel
+                />
               ) : null}
               <Button
                 type="primary"

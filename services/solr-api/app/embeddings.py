@@ -107,6 +107,15 @@ class EmbeddingService:
                 self._query_cache.popitem(last=False)
             return list(vector), (perf_counter() - started) * 1000, False
 
+    async def clear_query_cache(self) -> dict[str, Any]:
+        async with self._query_cache_lock:
+            cleared = len(self._query_cache)
+            self._query_cache.clear()
+        return {
+            "cleared": cleared,
+            "model": self.status(),
+        }
+
     def _load_model(self):
         from sentence_transformers import SentenceTransformer
 

@@ -17,6 +17,8 @@ After a successful search, the Embedding inspector calls `POST /api/model/embed`
 
 In the browser, the full vector is held only in the current TanStack Query memory cache and is not written to recent-search history or persistent browser storage. The adapter may retain the same vector in its bounded in-memory query cache.
 
+`DELETE /api/model/cache` clears only that bounded query-vector cache under its async lock. The model remains loaded, and the local Hugging Face model cache is untouched. The Overview and Embedding inspector expose this operation with confirmation and invalidate active frontend embedding previews afterward.
+
 ## Search behavior
 
 - Semantic mode performs Solr k-nearest-neighbor search with the generated query vector.

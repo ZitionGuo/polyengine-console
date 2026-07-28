@@ -106,6 +106,21 @@ async def test_query_embedding_cache_can_be_disabled():
 
 
 @pytest.mark.anyio
+async def test_query_embedding_cache_can_be_cleared_without_unloading_model():
+    service, model = ready_service()
+    await service.encode_query("cached query")
+
+    result = await service.clear_query_cache()
+    _, _, cache_hit = await service.encode_query("cached query")
+
+    assert result["cleared"] == 1
+    assert result["model"]["query_cache"]["entries"] == 0
+    assert service.status()["status"] == "ready"
+    assert cache_hit is False
+    assert model.calls == 2
+
+
+@pytest.mark.anyio
 async def test_embedding_preview_returns_vector_statistics_and_cache_state():
     result = await preview_embedding(
         EmbeddingPreviewRequest(text="  schema migration  "),

@@ -47,6 +47,11 @@ async def load_model(embeddings: EmbeddingService = Depends(get_embedding_servic
     return await embeddings.load()
 
 
+@router.delete("/model/cache")
+async def clear_model_cache(embeddings: EmbeddingService = Depends(get_embedding_service)):
+    return await embeddings.clear_query_cache()
+
+
 @router.post("/model/embed")
 async def preview_embedding(
     payload: EmbeddingPreviewRequest,

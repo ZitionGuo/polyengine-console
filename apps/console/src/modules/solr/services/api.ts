@@ -3,6 +3,16 @@ export interface ModelStatus {
   dimension: number;
   status: "not_loaded" | "loading" | "ready" | "error";
   error?: string | null;
+  query_cache?: {
+    entries: number;
+    capacity: number;
+    ttl_seconds: number;
+  };
+}
+
+export interface EmbeddingCacheClearResult {
+  cleared: number;
+  model: ModelStatus;
 }
 
 export interface EmbeddingPreview {
@@ -304,6 +314,8 @@ export const api = {
   health: () => request<HealthResult>("/api/health"),
   model: () => request<ModelStatus>("/api/model"),
   loadModel: () => request<ModelStatus>("/api/model/load", { method: "POST" }),
+  clearEmbeddingCache: () =>
+    request<EmbeddingCacheClearResult>("/api/model/cache", { method: "DELETE" }),
   previewEmbedding: (text: string, signal?: AbortSignal) =>
     request<EmbeddingPreview>("/api/model/embed", {
       method: "POST",

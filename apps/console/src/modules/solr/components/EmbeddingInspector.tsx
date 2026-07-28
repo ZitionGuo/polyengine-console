@@ -13,6 +13,7 @@ import { Check, Copy, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { api, errorMessage } from "../services/api";
+import { EmbeddingCacheClearButton } from "./EmbeddingCacheClearButton";
 
 interface EmbeddingInspectorProps {
   open: boolean;
@@ -63,14 +64,17 @@ export const EmbeddingInspector = ({
       width="min(720px, 100vw)"
       className="embedding-inspector"
       extra={
-        <Button
-          size="small"
-          icon={copied ? <Check size={14} /> : <Copy size={14} />}
-          disabled={!preview.data || !navigator.clipboard}
-          onClick={() => void copyVector()}
-        >
-          {copied ? "Copied" : "Copy vector"}
-        </Button>
+        <Space size="small">
+          <EmbeddingCacheClearButton onCleared={() => setCopied(false)} />
+          <Button
+            size="small"
+            icon={copied ? <Check size={14} /> : <Copy size={14} />}
+            disabled={!preview.data || !navigator.clipboard}
+            onClick={() => void copyVector()}
+          >
+            {copied ? "Copied" : "Copy vector"}
+          </Button>
+        </Space>
       }
     >
       {preview.isLoading ? <Skeleton active paragraph={{ rows: 8 }} /> : null}
