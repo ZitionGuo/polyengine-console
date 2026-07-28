@@ -15,7 +15,7 @@ from fastapi import HTTPException, UploadFile
 from .config import Settings
 from .embeddings import EmbeddingService
 from .models import IngestJobCreateRequest
-from .schema import require_collection_schema
+from .schema import require_collection_schema, require_vector_field
 from .solr import SolrClient
 
 
@@ -114,6 +114,10 @@ class IngestJob:
             "id": self.id,
             "collection": self.config.collection,
             "filename": self.filename,
+            "vector_targets": [
+                target.model_dump()
+                for target in self.config.vector_targets
+            ],
             "status": self.status,
             "total": self.total,
             "processed": self.processed,
@@ -204,16 +208,30 @@ class IngestManager:
         upload = self.uploads.get(config.upload_id)
         if upload is None:
             raise HTTPException(status_code=404, detail={"message": "Upload was not found or has expired."})
+        text_fields = list(
+            dict.fromkeys(
+                field_name
+                for target in config.vector_targets
+                for field_name in target.text_fields
+            )
+        )
+        first_target = config.vector_targets[0]
         schema = await require_collection_schema(
             self.solr,
             config.collection,
             expected_dimension=self.embeddings.dimension,
-            vector_field=config.vector_field,
-            return_fields=[config.id_field, *config.text_fields],
+            vector_field=first_target.vector_field,
+            return_fields=[config.id_field, *text_fields],
         )
+        for target in config.vector_targets[1:]:
+            require_vector_field(
+                schema,
+                target.vector_field,
+                expected_dimension=self.embeddings.dimension,
+            )
         schema_names = {field["name"] for field in schema["fields"]}
         missing_upload = [
-            name for name in [config.id_field, *config.text_fields] if name not in upload.fields
+            name for name in [config.id_field, *text_fields] if name not in upload.fields
         ]
         if missing_upload:
             raise HTTPException(
@@ -293,30 +311,61 @@ class IngestManager:
         records: list[dict[str, Any]],
         start_index: int,
     ) -> None:
-        valid: list[tuple[int, dict[str, Any], str, str]] = []
+        valid: list[tuple[int, dict[str, Any], str, dict[str, str]]] = []
         for offset, record in enumerate(records):
             row = start_index + offset + 1
             document_id = str(record.get(job.config.id_field, "")).strip()
-            text = "\n\n".join(
-                str(record.get(field_name, "")).strip()
-                for field_name in job.config.text_fields
-                if str(record.get(field_name, "")).strip()
+            target_texts = {
+                target.vector_field: "\n\n".join(
+                    value
+                    for field_name in target.text_fields
+                    if (value := str(record.get(field_name, "")).strip())
+                )
+                for target in job.config.vector_targets
+            }
+            missing_target = next(
+                (
+                    target.vector_field
+                    for target in job.config.vector_targets
+                    if not target_texts[target.vector_field]
+                ),
+                None,
             )
-            if not document_id or not text:
-                missing = "ID" if not document_id else "text"
+            if not document_id or missing_target:
+                missing = (
+                    "ID"
+                    if not document_id
+                    else f"text for vector field '{missing_target}'"
+                )
                 job.errors.append(IngestError(row=row, document_id=document_id, message=f"Missing {missing}."))
                 job.failed += 1
                 job.processed += 1
                 continue
-            valid.append((row, record, document_id, text))
+            valid.append((row, record, document_id, target_texts))
         if not valid:
             return
 
         try:
-            vectors, _ = await self.embeddings.encode([item[3] for item in valid])
+            vectors_by_field: dict[str, list[list[float]]] = {}
+            for target in job.config.vector_targets:
+                vectors, _ = await self.embeddings.encode(
+                    [
+                        target_texts[target.vector_field]
+                        for _, _, _, target_texts in valid
+                    ]
+                )
+                vectors_by_field[target.vector_field] = vectors
             documents = []
-            for (_, record, _, _), vector in zip(valid, vectors, strict=True):
-                documents.append({**record, job.config.vector_field: vector})
+            for index, (_, record, _, _) in enumerate(valid):
+                documents.append(
+                    {
+                        **record,
+                        **{
+                            target.vector_field: vectors_by_field[target.vector_field][index]
+                            for target in job.config.vector_targets
+                        },
+                    }
+                )
             await self.solr.request(
                 "POST",
                 f"/{quote(job.config.collection, safe='')}/update",

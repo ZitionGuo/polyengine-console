@@ -22,7 +22,9 @@ The default model is `sentence-transformers/all-MiniLM-L6-v2`. The model is down
 
 ## Ingestion
 
-JSON, JSONL, and CSV uploads are staged locally and converted into background ingestion jobs. Uploaded data and job state are ephemeral and expire after the configured TTL or when the adapter shuts down.
+JSON, JSONL, and CSV uploads are staged locally and converted into background ingestion jobs. A job can map one or more Solr vector fields to different source-text field sets; all generated vectors are written in the same Solr update. The legacy single `vector_field` plus `text_fields` request shape remains accepted.
+
+Uploaded data and job state are ephemeral and expire after the configured TTL or when the adapter shuts down.
 
 Credentials belong only in `services/solr-api/.env`:
 

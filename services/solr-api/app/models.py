@@ -127,18 +127,13 @@ class SearchFuseRequest(SearchCompareRequest):
         return self
 
 
-class IngestJobCreateRequest(BaseModel):
-    upload_id: str = Field(min_length=1)
-    collection: str = Field(min_length=1)
-    id_field: str = Field(min_length=1)
-    text_fields: list[str] = Field(min_length=1)
+class IngestVectorTarget(BaseModel):
     vector_field: str = Field(min_length=1)
-    batch_size: int = Field(default=64, ge=1, le=256)
-    commit_within_ms: int = Field(default=1000, ge=0, le=60_000)
+    text_fields: list[str] = Field(min_length=1, max_length=32)
 
-    @field_validator("upload_id", "collection", "id_field", "vector_field")
+    @field_validator("vector_field")
     @classmethod
-    def strip_value(cls, value: str) -> str:
+    def strip_vector_field(cls, value: str) -> str:
         return value.strip()
 
     @field_validator("text_fields")
@@ -148,6 +143,66 @@ class IngestJobCreateRequest(BaseModel):
         if not cleaned:
             raise ValueError("At least one text field is required.")
         return cleaned
+
+
+class IngestJobCreateRequest(BaseModel):
+    upload_id: str = Field(min_length=1)
+    collection: str = Field(min_length=1)
+    id_field: str = Field(min_length=1)
+    vector_targets: list[IngestVectorTarget] = Field(default_factory=list, max_length=16)
+    text_fields: list[str] | None = Field(default=None, min_length=1, max_length=32)
+    vector_field: str | None = Field(default=None, min_length=1)
+    batch_size: int = Field(default=64, ge=1, le=256)
+    commit_within_ms: int = Field(default=1000, ge=0, le=60_000)
+
+    @field_validator("upload_id", "collection", "id_field")
+    @classmethod
+    def strip_value(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("vector_field")
+    @classmethod
+    def strip_optional_vector_field(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @field_validator("text_fields")
+    @classmethod
+    def clean_legacy_text_fields(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        cleaned = list(dict.fromkeys(value.strip() for value in values if value.strip()))
+        if not cleaned:
+            raise ValueError("At least one text field is required.")
+        return cleaned
+
+    @model_validator(mode="after")
+    def normalize_vector_targets(self):
+        legacy_present = self.vector_field is not None or self.text_fields is not None
+        if self.vector_targets and legacy_present:
+            raise ValueError("Use vector_targets or the legacy vector_field/text_fields pair, not both.")
+        if not self.vector_targets:
+            if self.vector_field is None or self.text_fields is None:
+                raise ValueError("At least one vector target is required.")
+            self.vector_targets = [
+                IngestVectorTarget(
+                    vector_field=self.vector_field,
+                    text_fields=self.text_fields,
+                )
+            ]
+        duplicates = sorted(
+            {
+                target.vector_field
+                for target in self.vector_targets
+                if sum(
+                    item.vector_field == target.vector_field
+                    for item in self.vector_targets
+                )
+                > 1
+            }
+        )
+        if duplicates:
+            raise ValueError(f"Vector fields may be mapped only once: {', '.join(duplicates)}.")
+        return self
 
 
 class SolrErrorDetail(BaseModel):

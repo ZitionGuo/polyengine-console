@@ -1,6 +1,11 @@
 import { afterEach, vi } from "vitest";
 
-import { api, errorMessage, type SearchPayload } from "./api";
+import {
+  api,
+  errorMessage,
+  type IngestJobPayload,
+  type SearchPayload,
+} from "./api";
 
 const payload: SearchPayload = {
   collection: "docs",
@@ -58,5 +63,49 @@ describe("search cancellation", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abortError));
 
     await expect(api.search(payload, new AbortController().signal)).rejects.toBe(abortError);
+  });
+});
+
+describe("ingest jobs", () => {
+  it("sends independent source mappings for every vector target", async () => {
+    const ingestPayload: IngestJobPayload = {
+      upload_id: "upload-1",
+      collection: "docs",
+      id_field: "id",
+      vector_targets: [
+        { vector_field: "embedding", text_fields: ["title", "content"] },
+        { vector_field: "embedding_title", text_fields: ["title"] },
+      ],
+      batch_size: 64,
+      commit_within_ms: 1000,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "job-1",
+          collection: "docs",
+          filename: "documents.jsonl",
+          vector_targets: ingestPayload.vector_targets,
+          status: "queued",
+          total: 2,
+          processed: 0,
+          succeeded: 0,
+          failed: 0,
+          created_at: "2026-07-28T00:00:00Z",
+        }),
+        { status: 202 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.createJob(ingestPayload);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/solr/ingest/jobs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(ingestPayload),
+      }),
+    );
   });
 });

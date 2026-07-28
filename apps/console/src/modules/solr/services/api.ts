@@ -178,12 +178,16 @@ export interface UploadResult {
   expires_at: string;
 }
 
+export interface IngestVectorTarget {
+  vector_field: string;
+  text_fields: string[];
+}
+
 export interface IngestJobPayload {
   upload_id: string;
   collection: string;
   id_field: string;
-  text_fields: string[];
-  vector_field: string;
+  vector_targets: IngestVectorTarget[];
   batch_size: number;
   commit_within_ms: number;
 }
@@ -192,6 +196,7 @@ export interface IngestJob {
   id: string;
   collection: string;
   filename: string;
+  vector_targets: IngestVectorTarget[];
   status: "queued" | "running" | "completed" | "cancelled" | "failed";
   total: number;
   processed: number;

@@ -11,11 +11,21 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
   Upload,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Ban, Download, FileUp, Play, RefreshCw, UploadCloud } from "lucide-react";
+import {
+  Ban,
+  Download,
+  FileUp,
+  Plus,
+  Play,
+  RefreshCw,
+  Trash2,
+  UploadCloud,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { AdaptiveSelect } from "../components/AdaptiveSelect";
@@ -25,8 +35,14 @@ import {
   errorMessage,
   type IngestJob,
   type IngestJobPayload,
+  type IngestVectorTarget,
   type UploadResult,
 } from "../services/api";
+import {
+  addMissingVectorTargets,
+  reconcileVectorTargets,
+  suggestTextFields,
+} from "../services/ingestMapping";
 import { selectedCollection } from "../services/navigation";
 
 type JobForm = Omit<IngestJobPayload, "upload_id">;
@@ -45,6 +61,7 @@ export const IngestPage = () => {
   const [file, setFile] = useState<File | null>(null);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [collection, setCollection] = useState(selectedCollection());
+  const idField = Form.useWatch("id_field", form);
   const collections = useQuery({ queryKey: ["solr", "collections"], queryFn: api.collections });
   const schema = useQuery({
     queryKey: ["solr", "schema", collection],
@@ -62,7 +79,18 @@ export const IngestPage = () => {
     onSuccess: (result) => {
       setUploadResult(result);
       const firstId = result.fields.find((fieldName) => fieldName === "id") ?? result.fields[0];
-      form.setFieldsValue({ id_field: firstId });
+      const compatibleFields = (
+        schema.data?.vector_fields.filter((field) => field.compatible) ?? []
+      ).map((field) => field.name);
+      form.setFieldsValue({
+        id_field: firstId,
+        vector_targets: reconcileVectorTargets(
+          compatibleFields,
+          result.fields,
+          firstId,
+          form.getFieldValue("vector_targets"),
+        ),
+      });
     },
   });
   const createJob = useMutation({
@@ -90,11 +118,19 @@ export const IngestPage = () => {
 
   useEffect(() => {
     if (!schema.data) return;
+    const compatibleFields = schema.data.vector_fields
+      .filter((field) => field.compatible)
+      .map((field) => field.name);
     form.setFieldsValue({
       collection,
-      vector_field: schema.data.vector_fields.find((field) => field.compatible)?.name,
+      vector_targets: reconcileVectorTargets(
+        compatibleFields,
+        uploadResult?.fields ?? [],
+        form.getFieldValue("id_field"),
+        form.getFieldValue("vector_targets"),
+      ),
     });
-  }, [collection, form, schema.data]);
+  }, [collection, form, schema.data, uploadResult?.fields]);
 
   const startJob = (values: JobForm) => {
     if (!uploadResult) return;
@@ -118,6 +154,15 @@ export const IngestPage = () => {
         <Space direction="vertical" size={0}>
           <Typography.Text strong>{value}</Typography.Text>
           <Typography.Text type="secondary">{row.collection}</Typography.Text>
+          <Tooltip
+            title={row.vector_targets
+              .map((target) => `${target.vector_field} <- ${target.text_fields.join(" + ")}`)
+              .join("\n")}
+          >
+            <Tag className="job-vector-targets">
+              {row.vector_targets.length} vector {row.vector_targets.length === 1 ? "target" : "targets"}
+            </Tag>
+          </Tooltip>
         </Space>
       ),
     },
@@ -240,32 +285,165 @@ export const IngestPage = () => {
               <AdaptiveSelect
                 options={readyCollections.map((item) => ({ label: item.name, value: item.name }))}
                 placeholder="Select collection"
-                onChange={setCollection}
+                onChange={(value) => {
+                  form.setFieldValue("vector_targets", []);
+                  setCollection(value);
+                }}
               />
             </Form.Item>
-            <div className="form-grid two">
-              <Form.Item name="id_field" label="Document ID" rules={[{ required: true }]}>
-                <Select
-                  disabled={!uploadResult}
-                  options={uploadResult?.fields.map((fieldName) => ({ label: fieldName, value: fieldName }))}
-                  placeholder="Source ID field"
-                />
-              </Form.Item>
-              <Form.Item name="vector_field" label="Vector field" rules={[{ required: true }]}>
-                <AdaptiveSelect
-                  options={vectorFields.map((field) => ({ label: field.name, value: field.name }))}
-                  placeholder="Solr vector field"
-                />
-              </Form.Item>
-            </div>
-            <Form.Item name="text_fields" label="Text fields" rules={[{ required: true }]}>
+            <Form.Item name="id_field" label="Document ID" rules={[{ required: true }]}>
               <Select
-                mode="multiple"
                 disabled={!uploadResult}
                 options={uploadResult?.fields.map((fieldName) => ({ label: fieldName, value: fieldName }))}
-                placeholder="Fields to concatenate and embed"
+                placeholder="Source ID field"
+                onChange={(value) => {
+                  form.setFieldValue(
+                    "vector_targets",
+                    reconcileVectorTargets(
+                      vectorFields.map((field) => field.name),
+                      uploadResult?.fields ?? [],
+                      value,
+                      form.getFieldValue("vector_targets"),
+                    ),
+                  );
+                }}
               />
             </Form.Item>
+            <Form.List
+              name="vector_targets"
+              rules={[
+                {
+                  validator: async (_, targets: IngestVectorTarget[] | undefined) => {
+                    if (!targets?.length) throw new Error("Add at least one vector target.");
+                    const names = targets.map((target) => target?.vector_field).filter(Boolean);
+                    if (new Set(names).size !== names.length) {
+                      throw new Error("Each vector field can be mapped only once.");
+                    }
+                  },
+                },
+              ]}
+            >
+              {(fields, { add, remove }, { errors }) => {
+                const selected = new Set(
+                  (form.getFieldValue("vector_targets") as IngestVectorTarget[] | undefined)
+                    ?.map((target) => target?.vector_field)
+                    .filter(Boolean),
+                );
+                const nextVector = vectorFields.find((field) => !selected.has(field.name));
+                return (
+                  <div className="vector-target-builder">
+                    <div className="vector-target-heading">
+                      <div>
+                        <Typography.Text strong>Vector targets</Typography.Text>
+                        <Typography.Text type="secondary">
+                          Map each Solr vector field to its own source text.
+                        </Typography.Text>
+                      </div>
+                      <Space size={6} wrap>
+                        {vectorFields.length > 1 ? (
+                          <Button
+                            size="small"
+                            onClick={() =>
+                              form.setFieldValue(
+                                "vector_targets",
+                                addMissingVectorTargets(
+                                  vectorFields.map((field) => field.name),
+                                  uploadResult?.fields ?? [],
+                                  idField,
+                                  form.getFieldValue("vector_targets"),
+                                ),
+                              )}
+                          >
+                            Add all
+                          </Button>
+                        ) : null}
+                        <Button
+                          size="small"
+                          icon={<Plus size={14} />}
+                          disabled={!nextVector}
+                          onClick={() => {
+                            if (!nextVector) return;
+                            add({
+                              vector_field: nextVector.name,
+                              text_fields: suggestTextFields(
+                                nextVector.name,
+                                uploadResult?.fields ?? [],
+                                idField,
+                              ),
+                            });
+                          }}
+                        >
+                          Add target
+                        </Button>
+                      </Space>
+                    </div>
+
+                    {fields.map(({ key, ...field }, index) => (
+                      <div className="vector-target-row" key={key}>
+                        <Form.Item
+                          {...field}
+                          name={[field.name, "vector_field"]}
+                          label={`Vector field ${index + 1}`}
+                          rules={[{ required: true, message: "Select a vector field." }]}
+                        >
+                          <Select
+                            options={vectorFields.map((item) => ({
+                              label: item.name,
+                              value: item.name,
+                            }))}
+                            placeholder="Solr vector field"
+                            onChange={(value) =>
+                              form.setFieldValue(
+                                ["vector_targets", field.name, "text_fields"],
+                                suggestTextFields(
+                                  value,
+                                  uploadResult?.fields ?? [],
+                                  idField,
+                                ),
+                              )}
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          {...field}
+                          name={[field.name, "text_fields"]}
+                          label="Source text fields"
+                          rules={[
+                            {
+                              required: true,
+                              type: "array",
+                              min: 1,
+                              message: "Select at least one source field.",
+                            },
+                          ]}
+                        >
+                          <Select
+                            mode="multiple"
+                            disabled={!uploadResult}
+                            options={uploadResult?.fields
+                              .filter((fieldName) => fieldName !== idField)
+                              .map((fieldName) => ({ label: fieldName, value: fieldName }))}
+                            placeholder="Fields to concatenate and embed"
+                            maxTagCount="responsive"
+                          />
+                        </Form.Item>
+                        <Tooltip title="Remove vector target">
+                          <Button
+                            className="vector-target-remove"
+                            type="text"
+                            danger
+                            icon={<Trash2 size={16} />}
+                            aria-label={`Remove vector target ${index + 1}`}
+                            disabled={fields.length === 1}
+                            onClick={() => remove(field.name)}
+                          />
+                        </Tooltip>
+                      </div>
+                    ))}
+                    <Form.ErrorList errors={errors} />
+                  </div>
+                );
+              }}
+            </Form.List>
             <div className="form-grid two">
               <Form.Item name="batch_size" label="Embedding batch">
                 <InputNumber min={1} max={256} className="full-width" />
