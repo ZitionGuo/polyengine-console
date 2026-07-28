@@ -11,6 +11,9 @@ describe("application navigation", () => {
   it("maps engine routes and collection detail paths", () => {
     expect(resolveAppRoute("/qdrant/aliases").route.page).toBe("qdrant-aliases");
     expect(resolveAppRoute("/solr/search").route.page).toBe("solr-search");
+    expect(resolveAppRoute("/elasticsearch/search").route.page).toBe(
+      "elasticsearch-search",
+    );
     expect(resolveAppRoute("/qdrant/collections/docs").route.page).toBe(
       "qdrant-collections",
     );
@@ -31,6 +34,15 @@ describe("application navigation", () => {
     expect(route.path).toBe("/solr/ingest");
     expect(documentTitle(route)).toBe(
       "Ingest · Solr · PolyEngine Console",
+    );
+  });
+
+  it("keeps Elasticsearch routes isolated from other engine namespaces", () => {
+    const route = routeForPage("elasticsearch-indices");
+    expect(route.engine).toBe("elasticsearch");
+    expect(route.path).toBe("/elasticsearch/indices");
+    expect(documentTitle(route)).toBe(
+      "Indices · Elasticsearch · PolyEngine Console",
     );
   });
 });

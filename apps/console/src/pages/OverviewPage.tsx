@@ -5,6 +5,7 @@ import {
   Boxes,
   BrainCircuit,
   Database,
+  LibraryBig,
   RefreshCw,
   Search,
   Server,
@@ -20,6 +21,10 @@ import {
   errorMessage,
 } from "../modules/solr/services/api";
 import { EmbeddingCacheClearButton } from "../modules/solr/components/EmbeddingCacheClearButton";
+import {
+  api as elasticsearchApi,
+  errorMessage as elasticsearchErrorMessage,
+} from "../modules/elasticsearch/services/api";
 
 interface OverviewPageProps {
   onNavigate: (page: AppPage) => void;
@@ -96,6 +101,17 @@ export const OverviewPage = ({ onNavigate }: OverviewPageProps) => {
     queryFn: solrApi.collections,
     enabled: solrHealth.isSuccess,
   });
+  const elasticsearchHealth = useQuery({
+    queryKey: ["elasticsearch", "health"],
+    queryFn: elasticsearchApi.health,
+    staleTime: 0,
+    refetchInterval: 30_000,
+  });
+  const elasticsearchIndices = useQuery({
+    queryKey: ["elasticsearch", "indices"],
+    queryFn: elasticsearchApi.indices,
+    enabled: elasticsearchHealth.isSuccess,
+  });
   const loadModel = useMutation({
     mutationFn: solrApi.loadModel,
     onSuccess: () => {
@@ -103,10 +119,18 @@ export const OverviewPage = ({ onNavigate }: OverviewPageProps) => {
       void cache.invalidateQueries({ queryKey: ["solr", "model"] });
     },
   });
+  const loadElasticsearchModel = useMutation({
+    mutationFn: elasticsearchApi.loadModel,
+    onSuccess: () => {
+      void cache.invalidateQueries({ queryKey: ["elasticsearch", "health"] });
+      void cache.invalidateQueries({ queryKey: ["elasticsearch", "model"] });
+    },
+  });
 
   const refresh = () => {
     void cache.invalidateQueries({ queryKey: ["qdrant"] });
     void cache.invalidateQueries({ queryKey: ["solr"] });
+    void cache.invalidateQueries({ queryKey: ["elasticsearch"] });
   };
 
   const qdrantTone: StatusTone = qdrantHealth.isPending
@@ -119,10 +143,16 @@ export const OverviewPage = ({ onNavigate }: OverviewPageProps) => {
     : solrHealth.isError
       ? "offline"
       : "online";
+  const elasticsearchTone: StatusTone = elasticsearchHealth.isPending
+    ? "checking"
+    : elasticsearchHealth.isError
+      ? "offline"
+      : "online";
   const qdrantCount =
     qdrantCollections.data?.result?.collections?.length;
   const solrCount = solrCollections.data?.collections.length;
   const model = solrHealth.data?.model;
+  const elasticsearchModel = elasticsearchHealth.data?.model;
 
   return (
     <div className="overview-page">
@@ -287,6 +317,88 @@ export const OverviewPage = ({ onNavigate }: OverviewPageProps) => {
             </Space>
           </div>
         </article>
+
+        <article className="engine-card">
+          <div className="engine-card-accent engine-card-accent-elasticsearch" />
+          <div className="engine-card-header">
+            <div className="engine-identity">
+              <div className="engine-icon engine-icon-elasticsearch">
+                <LibraryBig size={20} />
+              </div>
+              <div>
+                <Typography.Title level={3}>Elasticsearch</Typography.Title>
+                <Typography.Text type="secondary">Hybrid vector search workbench</Typography.Text>
+              </div>
+            </div>
+            <StatusPill tone={elasticsearchTone} />
+          </div>
+
+          {elasticsearchHealth.isPending ? (
+            <Skeleton active paragraph={{ rows: 2 }} title={false} />
+          ) : elasticsearchHealth.isError ? (
+            <Alert
+              type="error"
+              showIcon
+              message="Elasticsearch is unreachable"
+              description={elasticsearchErrorMessage(elasticsearchHealth.error)}
+            />
+          ) : (
+            <div className="engine-metrics">
+              <div>
+                <span>Version</span>
+                <strong>{elasticsearchHealth.data?.elasticsearch.version ?? "Available"}</strong>
+              </div>
+              <div>
+                <span>Vector indices</span>
+                <strong>
+                  {elasticsearchIndices.data?.indices.filter((index) => index.ready).length ?? "—"}
+                </strong>
+              </div>
+              <div>
+                <span>Embedding model</span>
+                <Tooltip title={elasticsearchModel?.name}>
+                  <strong className="metric-with-icon">
+                    <BrainCircuit size={15} />
+                    {elasticsearchModel?.status === "ready"
+                      ? "Ready"
+                      : elasticsearchModel?.status === "loading"
+                        ? "Loading"
+                        : "Not loaded"}
+                  </strong>
+                </Tooltip>
+              </div>
+            </div>
+          )}
+
+          <div className="engine-card-footer">
+            <Tooltip title={elasticsearchHealth.data?.elasticsearch.endpoint ?? "Elasticsearch endpoint"}>
+              <code>
+                {endpointLabel(
+                  elasticsearchHealth.data?.elasticsearch.endpoint,
+                  "localhost:9200",
+                )}
+              </code>
+            </Tooltip>
+            <Space>
+              {elasticsearchHealth.isSuccess && elasticsearchModel?.status !== "ready" ? (
+                <Button
+                  icon={<BrainCircuit size={15} />}
+                  loading={loadElasticsearchModel.isPending}
+                  onClick={() => loadElasticsearchModel.mutate()}
+                >
+                  Load model
+                </Button>
+              ) : null}
+              <Button
+                type="primary"
+                icon={<Search size={15} />}
+                onClick={() => onNavigate("elasticsearch-search")}
+              >
+                Search
+              </Button>
+            </Space>
+          </div>
+        </article>
       </section>
 
       <section className="workspace-strip">
@@ -296,7 +408,7 @@ export const OverviewPage = ({ onNavigate }: OverviewPageProps) => {
         <div>
           <Typography.Text strong>Independent engine services</Typography.Text>
           <Typography.Text type="secondary">
-            Qdrant and Solr keep separate API processes, health checks, and cached data.
+            Qdrant, Solr, and Elasticsearch keep separate API processes, health checks, and cached data.
           </Typography.Text>
         </div>
       </section>

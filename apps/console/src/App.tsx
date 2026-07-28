@@ -20,6 +20,7 @@ import {
   DatabaseZap,
   GitBranch,
   LayoutDashboard,
+  LibraryBig,
   Menu as MenuIcon,
   Network,
   RefreshCw,
@@ -31,9 +32,11 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { engineRegistry, type AppPage } from "./engineRegistry";
 import { api as qdrantApi } from "./modules/qdrant/services/api";
 import { api as solrApi } from "./modules/solr/services/api";
+import { api as elasticsearchApi } from "./modules/elasticsearch/services/api";
 import { documentTitle, resolveAppRoute, routeForPage, type AppRoute } from "./navigation";
 import "./modules/qdrant/qdrant.css";
 import "./modules/solr/solr.css";
+import "./modules/elasticsearch/elasticsearch.css";
 import "./styles/app.css";
 
 const OverviewPage = lazy(() =>
@@ -74,6 +77,16 @@ const SolrIngestPage = lazy(() =>
     default: module.IngestPage,
   })),
 );
+const ElasticsearchIndicesPage = lazy(() =>
+  import("./modules/elasticsearch/pages/IndicesPage").then((module) => ({
+    default: module.IndicesPage,
+  })),
+);
+const ElasticsearchSearchPage = lazy(() =>
+  import("./modules/elasticsearch/pages/VectorSearchPage").then((module) => ({
+    default: module.VectorSearchPage,
+  })),
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -90,6 +103,7 @@ const iconMap = {
   cluster: <Network size={17} />,
   collections: <Boxes size={17} />,
   ingest: <DatabaseZap size={17} />,
+  indices: <LibraryBig size={17} />,
   rest: <Braces size={17} />,
   search: <Search size={17} />,
 };
@@ -176,6 +190,8 @@ const pageContent = (
   if (page === "solr-collections") return <SolrCollectionsPage />;
   if (page === "solr-search") return <SolrSearchPage />;
   if (page === "solr-ingest") return <SolrIngestPage />;
+  if (page === "elasticsearch-indices") return <ElasticsearchIndicesPage />;
+  if (page === "elasticsearch-search") return <ElasticsearchSearchPage />;
   return <QdrantCollectionsPage />;
 };
 
@@ -196,6 +212,13 @@ const Shell = () => {
   const solrHealth = useQuery({
     queryKey: ["solr", "health"],
     queryFn: solrApi.health,
+    retry: 2,
+    staleTime: 0,
+    refetchInterval: 30_000,
+  });
+  const elasticsearchHealth = useQuery({
+    queryKey: ["elasticsearch", "health"],
+    queryFn: elasticsearchApi.health,
     retry: 2,
     staleTime: 0,
     refetchInterval: 30_000,
@@ -255,6 +278,11 @@ const Shell = () => {
       ? solrHealth.error.message
       : "Solr API is unavailable."
     : "Solr API is reachable.";
+  const elasticsearchMessage = elasticsearchHealth.isError
+    ? elasticsearchHealth.error instanceof Error
+      ? elasticsearchHealth.error.message
+      : "Elasticsearch API is unavailable."
+    : "Elasticsearch API is reachable.";
 
   return (
     <Layout className="polyengine-shell">
@@ -263,7 +291,7 @@ const Shell = () => {
         <NavigationMenu page={route.page} onNavigate={navigateTo} />
         <div className="sider-footnote">
           <Cable size={15} />
-          <span>2 engine adapters</span>
+          <span>3 engine adapters</span>
         </div>
       </Layout.Sider>
 
@@ -295,6 +323,12 @@ const Shell = () => {
                 fetching={solrHealth.isFetching}
                 failed={solrHealth.isError}
                 detail={solrMessage}
+              />
+              <HealthIndicator
+                engine="Elasticsearch"
+                fetching={elasticsearchHealth.isFetching}
+                failed={elasticsearchHealth.isError}
+                detail={elasticsearchMessage}
               />
             </div>
             <Tooltip title={`Refresh ${route.engine ?? "all engines"}`}>

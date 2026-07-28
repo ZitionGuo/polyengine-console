@@ -65,6 +65,20 @@ const routes: Record<AppPage, AppRoute> = {
     engine: "solr",
     section: "Solr",
   },
+  "elasticsearch-indices": {
+    page: "elasticsearch-indices",
+    path: "/elasticsearch/indices",
+    title: "Indices",
+    engine: "elasticsearch",
+    section: "Elasticsearch",
+  },
+  "elasticsearch-search": {
+    page: "elasticsearch-search",
+    path: "/elasticsearch/search",
+    title: "Vector Search",
+    engine: "elasticsearch",
+    section: "Elasticsearch",
+  },
 };
 
 const legacyRoutes: Record<string, AppPage> = {

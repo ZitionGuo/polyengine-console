@@ -1,0 +1,1 @@
+"""PolyEngine Elasticsearch adapter."""

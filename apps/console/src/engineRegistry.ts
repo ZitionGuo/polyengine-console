@@ -1,4 +1,4 @@
-export type EngineId = "qdrant" | "solr";
+export type EngineId = "qdrant" | "solr" | "elasticsearch";
 
 export interface EngineNavigationItem {
   key: AppPage;
@@ -8,6 +8,7 @@ export interface EngineNavigationItem {
     | "aliases"
     | "cluster"
     | "collections"
+    | "indices"
     | "ingest"
     | "rest"
     | "search";
@@ -30,7 +31,9 @@ export type AppPage =
   | "qdrant-rest"
   | "solr-collections"
   | "solr-search"
-  | "solr-ingest";
+  | "solr-ingest"
+  | "elasticsearch-indices"
+  | "elasticsearch-search";
 
 export const engineRegistry: EngineDefinition[] = [
   {
@@ -90,6 +93,27 @@ export const engineRegistry: EngineDefinition[] = [
         label: "Ingest",
         path: "/solr/ingest",
         icon: "ingest",
+      },
+    ],
+  },
+  {
+    id: "elasticsearch",
+    label: "Elasticsearch",
+    description: "Hybrid vector search workbench",
+    endpoint: "http://localhost:9200",
+    apiPrefix: "/api/elasticsearch",
+    navigation: [
+      {
+        key: "elasticsearch-indices",
+        label: "Indices",
+        path: "/elasticsearch/indices",
+        icon: "indices",
+      },
+      {
+        key: "elasticsearch-search",
+        label: "Vector Search",
+        path: "/elasticsearch/search",
+        icon: "search",
       },
     ],
   },

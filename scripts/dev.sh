@@ -44,6 +44,13 @@ PIDS+=("$!")
 PIDS+=("$!")
 
 (
+  cd "$ROOT_DIR/services/elasticsearch-api"
+  exec "$PYTHON_BIN" -m uvicorn app.main:app \
+    --reload --host 127.0.0.1 --port 8020
+) &
+PIDS+=("$!")
+
+(
   cd "$CONSOLE_DIR"
   exec npm run dev
 ) &
@@ -53,7 +60,8 @@ printf "\nPolyEngine Console is starting:\n"
 printf "  Console:     http://localhost:5173\n"
 printf "  Qdrant API:  http://localhost:8000/api/health\n"
 printf "  Solr API:    http://localhost:8010/api/health\n"
-printf "\nPress Ctrl+C to stop all three development processes.\n\n"
+printf "  Elasticsearch API: http://localhost:8020/api/health\n"
+printf "\nPress Ctrl+C to stop all four development processes.\n\n"
 
 set +e
 while true; do

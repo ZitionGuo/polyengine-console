@@ -283,6 +283,10 @@ textarea {
   background: #169c84;
 }
 
+.engine-card-accent-elasticsearch {
+  background: #5b63c9;
+}
+
 .engine-card-header {
   display: flex;
   gap: 18px;
@@ -317,6 +321,12 @@ textarea {
   color: #087d6b;
   background: #eaf8f5;
   border: 1px solid #c7e9e2;
+}
+
+.engine-icon-elasticsearch {
+  color: #414aa9;
+  background: #eff0ff;
+  border: 1px solid #d4d6f5;
 }
 
 .engine-identity h3.ant-typography {
