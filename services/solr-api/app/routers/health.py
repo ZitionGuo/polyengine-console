@@ -1,8 +1,12 @@
+from math import sqrt
+from statistics import fmean
+from time import perf_counter
 from typing import Any
 
 from fastapi import APIRouter, Depends
 
 from ..embeddings import EmbeddingService, get_embedding_service
+from ..models import EmbeddingPreviewRequest
 from ..solr import SolrClient, get_solr_client
 
 
@@ -41,3 +45,35 @@ async def model_status(embeddings: EmbeddingService = Depends(get_embedding_serv
 @router.post("/model/load")
 async def load_model(embeddings: EmbeddingService = Depends(get_embedding_service)):
     return await embeddings.load()
+
+
+@router.post("/model/embed")
+async def preview_embedding(
+    payload: EmbeddingPreviewRequest,
+    embeddings: EmbeddingService = Depends(get_embedding_service),
+):
+    started = perf_counter()
+    cold_start = embeddings.status()["status"] != "ready"
+    load_started = perf_counter()
+    await embeddings.load()
+    model_load_ms = (perf_counter() - load_started) * 1000
+    vector, embedding_ms, cache_hit = await embeddings.encode_query(payload.text)
+    total_ms = (perf_counter() - started) * 1000
+    return {
+        "model": embeddings.model_name,
+        "dimension": len(vector),
+        "vector": vector,
+        "statistics": {
+            "l2_norm": round(sqrt(sum(value * value for value in vector)), 8),
+            "minimum": round(min(vector), 8),
+            "maximum": round(max(vector), 8),
+            "mean": round(fmean(vector), 8),
+        },
+        "timings": {
+            "model_load_ms": round(model_load_ms, 3),
+            "embedding_ms": round(embedding_ms, 3),
+            "total_ms": round(total_ms, 3),
+        },
+        "cold_start": cold_start,
+        "cache_hit": cache_hit,
+    }

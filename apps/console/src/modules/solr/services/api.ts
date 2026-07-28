@@ -5,6 +5,25 @@ export interface ModelStatus {
   error?: string | null;
 }
 
+export interface EmbeddingPreview {
+  model: string;
+  dimension: number;
+  vector: number[];
+  statistics: {
+    l2_norm: number;
+    minimum: number;
+    maximum: number;
+    mean: number;
+  };
+  timings: {
+    model_load_ms: number;
+    embedding_ms: number;
+    total_ms: number;
+  };
+  cold_start: boolean;
+  cache_hit: boolean;
+}
+
 export interface HealthResult {
   status: string;
   solr: { version?: string; mode: string; endpoint: string; admin_url: string };
@@ -272,6 +291,12 @@ export const api = {
   health: () => request<HealthResult>("/api/health"),
   model: () => request<ModelStatus>("/api/model"),
   loadModel: () => request<ModelStatus>("/api/model/load", { method: "POST" }),
+  previewEmbedding: (text: string, signal?: AbortSignal) =>
+    request<EmbeddingPreview>("/api/model/embed", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+      signal,
+    }),
   collections: () => request<CollectionsResult>("/api/collections"),
   schema: (collection: string) =>
     request<CollectionSchema>(`/api/collections/${encodeURIComponent(collection)}/schema`),

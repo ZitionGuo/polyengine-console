@@ -11,6 +11,12 @@ The Solr module complements the official Solr Admin UI. It focuses on workflows 
 
 The default model is `sentence-transformers/all-MiniLM-L6-v2`. The model is downloaded by `sentence-transformers` on first use and then loaded from the local Hugging Face cache.
 
+## Query embedding inspection
+
+After a successful search, the Embedding inspector calls `POST /api/model/embed` on demand with the completed query text. It returns the exact vector together with the active model, dimension, L2 norm, value range, mean, cache state, cold-start state, and timing breakdown. Repeated inspection reuses the bounded query-embedding cache.
+
+In the browser, the full vector is held only in the current TanStack Query memory cache and is not written to recent-search history or persistent browser storage. The adapter may retain the same vector in its bounded in-memory query cache.
+
 ## Search behavior
 
 - Semantic mode performs Solr k-nearest-neighbor search with the generated query vector.

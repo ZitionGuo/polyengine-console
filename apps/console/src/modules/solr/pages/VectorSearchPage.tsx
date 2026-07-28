@@ -25,6 +25,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import {
   BarChart3,
+  Binary,
   CircleHelp,
   CircleStop,
   Combine,
@@ -44,6 +45,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AdaptiveSelect } from "../components/AdaptiveSelect";
 import { DocumentInspector, documentDisplayTitle } from "../components/DocumentInspector";
+import { EmbeddingInspector } from "../components/EmbeddingInspector";
 import { PageHeader } from "../components/PageHeader";
 import { QueryInspector } from "../components/QueryInspector";
 import { RelevanceButtons } from "../components/RelevanceButtons";
@@ -287,6 +289,7 @@ export const VectorSearchPage = () => {
   const [judgments, setJudgments] = useState<RelevanceJudgments>({});
   const [activeSearchPayload, setActiveSearchPayload] = useState<SearchPayload>();
   const [queryInspectorOpen, setQueryInspectorOpen] = useState(false);
+  const [embeddingInspectorOpen, setEmbeddingInspectorOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [scoreAnalysisOpen, setScoreAnalysisOpen] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<SearchHistoryEntry[]>(() => loadSearchHistory());
@@ -439,6 +442,7 @@ export const VectorSearchPage = () => {
     setInspectedDocument(undefined);
     setActiveSearchPayload(undefined);
     setQueryInspectorOpen(false);
+    setEmbeddingInspectorOpen(false);
     setScoreAnalysisOpen(false);
   };
 
@@ -694,6 +698,15 @@ export const VectorSearchPage = () => {
       onClick={() => setQueryInspectorOpen(true)}
     >
       Request
+    </Button>
+  ) : null;
+  const embeddingInspectorButton = activeSearchPayload && rankedResultSets.length ? (
+    <Button
+      size="small"
+      icon={<Binary size={14} />}
+      onClick={() => setEmbeddingInspectorOpen(true)}
+    >
+      Embedding
     </Button>
   ) : null;
   const completedSearchMode = fuseMutation.data?.mode
@@ -1351,6 +1364,7 @@ export const VectorSearchPage = () => {
                 {thresholdTag}
                 <Tag color="blue">Weighted RRF</Tag>
                 {scoreAnalysisButton}
+                {embeddingInspectorButton}
                 {queryInspectorButton}
                 {exportButton}
               </Space>
@@ -1359,6 +1373,7 @@ export const VectorSearchPage = () => {
                 <TimingBreakdown timings={compareMutation.data.timings} />
                 {thresholdTag}
                 {scoreAnalysisButton}
+                {embeddingInspectorButton}
                 {queryInspectorButton}
                 {exportButton}
               </Space>
@@ -1367,6 +1382,7 @@ export const VectorSearchPage = () => {
                 <TimingBreakdown timings={searchMutation.data.timings} />
                 {thresholdTag}
                 {scoreAnalysisButton}
+                {embeddingInspectorButton}
                 {queryInspectorButton}
                 {exportButton}
               </Space>
@@ -1682,7 +1698,7 @@ export const VectorSearchPage = () => {
                     {searchMutation.data.hybrid_strategy === "rrf" ? "Parallel RRF" : "Vector rerank"}
                   </Descriptions.Item>
                 ) : null}
-                <Descriptions.Item label="Model">all-MiniLM-L6-v2</Descriptions.Item>
+                <Descriptions.Item label="Model">{searchMutation.data.model}</Descriptions.Item>
                 <Descriptions.Item label="Dimension">{searchMutation.data.dimension}</Descriptions.Item>
               </Descriptions>
             </>
@@ -1721,6 +1737,16 @@ export const VectorSearchPage = () => {
           rrfK: watchedRrfK,
         }}
         onClose={() => setQueryInspectorOpen(false)}
+      />
+      <EmbeddingInspector
+        open={embeddingInspectorOpen}
+        text={activeSearchPayload?.text}
+        model={
+          fuseMutation.data?.model
+          ?? compareMutation.data?.model
+          ?? searchMutation.data?.model
+        }
+        onClose={() => setEmbeddingInspectorOpen(false)}
       />
       <ScoreAnalysisDrawer
         open={scoreAnalysisOpen}

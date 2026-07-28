@@ -25,7 +25,7 @@ PolyEngine Console is a modular administration workspace for local search infras
 | --- | --- |
 | **Unified workspace** | Engine overview, grouped navigation, live health indicators, responsive desktop/mobile shell, and isolated failure states. |
 | **Qdrant operations** | Collections, dense/named/sparse vectors, payload indexes, points, aliases, snapshots, optimization activity, cluster telemetry, and a guarded REST console. |
-| **Solr vector search** | Plain-English query embeddings, semantic and hybrid retrieval, explicit topK, multi-vector comparison and fusion, diagnostics, and relevance inspection. |
+| **Solr vector search** | Plain-English query embeddings, semantic and hybrid retrieval, explicit topK, multi-vector comparison and fusion, query-vector inspection, diagnostics, and relevance inspection. |
 | **Solr ingestion** | JSON, JSONL, and CSV uploads; independent source-text mappings for every vector field; batched embeddings; progress, cancellation, failed-row retries, and row-level error exports. |
 | **Local-first security** | API keys and credentials stay in backend-only `.env` files. The browser communicates only with namespaced local adapters. |
 | **Extensible foundation** | An engine registry and namespaced module layout are ready for future Elasticsearch and Dgraph adapters. |
@@ -34,7 +34,7 @@ PolyEngine Console is a modular administration workspace for local search infras
 
 ### Solr vector search
 
-Write a plain-English query and let the local embedding adapter build the Solr KNN request. The workbench keeps topK, vector-field selection, semantic/hybrid mode, multi-field comparison and fusion, score diagnostics, timing, relevance judgments, and exports in one place.
+Write a plain-English query and let the local embedding adapter build the Solr KNN request. The workbench keeps topK, vector-field selection, semantic/hybrid mode, multi-field comparison and fusion, exact query-vector inspection, score diagnostics, timing, relevance judgments, and exports in one place.
 
 ![Solr vector search results with topK scores and timing diagnostics](docs/images/solr-vector-search.png)
 

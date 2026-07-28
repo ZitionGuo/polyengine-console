@@ -5,6 +5,8 @@ import pytest
 
 from app.config import Settings
 from app.embeddings import EmbeddingService
+from app.models import EmbeddingPreviewRequest
+from app.routers.health import preview_embedding
 
 
 class FakeModel:
@@ -14,6 +16,20 @@ class FakeModel:
     def encode(self, texts, **kwargs):
         self.calls += 1
         return np.array([[float(index + 1) for index in range(3)] for _ in texts])
+
+
+class PreviewEmbeddingService:
+    model_name = "test/embedding-model"
+
+    def status(self):
+        return {"status": "ready"}
+
+    async def load(self):
+        return self.status()
+
+    async def encode_query(self, text):
+        assert text == "schema migration"
+        return [0.6, -0.8], 2.75, True
 
 
 def ready_service(*, size: int = 512, ttl: float = 900) -> tuple[EmbeddingService, FakeModel]:
@@ -87,3 +103,25 @@ async def test_query_embedding_cache_can_be_disabled():
     assert first[2] is False
     assert second[2] is False
     assert model.calls == 2
+
+
+@pytest.mark.anyio
+async def test_embedding_preview_returns_vector_statistics_and_cache_state():
+    result = await preview_embedding(
+        EmbeddingPreviewRequest(text="  schema migration  "),
+        PreviewEmbeddingService(),
+    )
+
+    assert result["model"] == "test/embedding-model"
+    assert result["dimension"] == 2
+    assert result["vector"] == [0.6, -0.8]
+    assert result["statistics"] == {
+        "l2_norm": 1.0,
+        "minimum": -0.8,
+        "maximum": 0.6,
+        "mean": -0.1,
+    }
+    assert result["timings"]["embedding_ms"] == 2.75
+    assert result["timings"]["total_ms"] >= 0
+    assert result["cold_start"] is False
+    assert result["cache_hit"] is True

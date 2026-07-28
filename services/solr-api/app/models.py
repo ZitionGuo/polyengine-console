@@ -127,6 +127,18 @@ class SearchFuseRequest(SearchCompareRequest):
         return self
 
 
+class EmbeddingPreviewRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+
+    @field_validator("text")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Query text cannot be empty.")
+        return value
+
+
 class IngestVectorTarget(BaseModel):
     vector_field: str = Field(min_length=1)
     text_fields: list[str] = Field(min_length=1, max_length=32)

@@ -66,6 +66,38 @@ describe("search cancellation", () => {
   });
 });
 
+describe("embedding preview", () => {
+  it("sends query text and the abort signal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          model: "model",
+          dimension: 2,
+          vector: [0.1, 0.2],
+          statistics: { l2_norm: 0.2236, minimum: 0.1, maximum: 0.2, mean: 0.15 },
+          timings: { model_load_ms: 0, embedding_ms: 1, total_ms: 1 },
+          cold_start: false,
+          cache_hit: false,
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await api.previewEmbedding("schema migration", controller.signal);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/solr/model/embed",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ text: "schema migration" }),
+        signal: controller.signal,
+      }),
+    );
+  });
+});
+
 describe("ingest jobs", () => {
   it("sends independent source mappings for every vector target", async () => {
     const ingestPayload: IngestJobPayload = {
